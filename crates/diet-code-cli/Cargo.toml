@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Diet Code CLI - put your AI coding agent on a diet"
 license = "MIT"
+repository = "https://github.com/Mohammad-Palla/diet-code"
+keywords = ["dead-code", "static-analysis", "cli", "ai"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "diet-code"

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Local-first static repository analyzer core for Diet Code"
 license = "MIT"
+repository = "https://github.com/Mohammad-Palla/diet-code"
+keywords = ["dead-code", "static-analysis", "tree-sitter", "refactoring"]
+categories = ["development-tools"]
 
 [dependencies]
 tree-sitter = "=0.22.6"
