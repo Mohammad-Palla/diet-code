@@ -1,0 +1,20 @@
+[
+  {
+    "name": "throw-http-errors-array",
+    "prompt": "In the got HTTP client library (this repository), extend the `throwHttpErrors` option so it also accepts an array of HTTP status codes. When an array is given, responses with those status codes must resolve normally instead of throwing an `HTTPError`; all other error statuses must still throw. Keep the existing boolean behavior completely unchanged. Update TypeScript types, option normalization/validation, and make the promise and stream APIs behave consistently. Keep changes minimal and follow the existing code style.",
+    "testFile": "task-throw-http-errors.test.ts",
+    "verify": "NODE_OPTIONS='--import=tsx/esm' ./node_modules/.bin/ava test/diet-task-throw-http-errors-array.ts test/retry.ts"
+  },
+  {
+    "name": "response-redirected",
+    "prompt": "In the got HTTP client library (this repository), add a `redirected` boolean property to responses for Fetch API parity: it must be `true` when the response is the result of one or more redirects and `false` otherwise. It must work for the promise and stream APIs and be present in the TypeScript types. Keep changes minimal and follow the existing code style.",
+    "testFile": "task-redirected.test.ts",
+    "verify": "NODE_OPTIONS='--import=tsx/esm' ./node_modules/.bin/ava test/diet-task-response-redirected.ts test/redirects.ts"
+  },
+  {
+    "name": "urlsearchparams-body",
+    "prompt": "In the got HTTP client library (this repository), accept a `URLSearchParams` instance as the request `body` for Fetch API parity: serialize it to an `application/x-www-form-urlencoded` string, set the `content-type` header automatically when the user did not set one explicitly, and make sure content-length is computed correctly. It must work for the promise and stream APIs. Keep changes minimal and follow the existing code style.",
+    "testFile": "task-urlsearchparams-body.test.ts",
+    "verify": "NODE_OPTIONS='--import=tsx/esm' ./node_modules/.bin/ava test/diet-task-urlsearchparams-body.ts test/post.ts"
+  }
+]

@@ -1,0 +1,7 @@
+[workspace]
+members = ["crates/diet-code-core", "crates/diet-code-cli"]
+resolver = "2"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

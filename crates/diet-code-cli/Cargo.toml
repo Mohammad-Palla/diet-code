@@ -1,0 +1,18 @@
+[package]
+name = "diet-code-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Diet Code CLI - put your AI coding agent on a diet"
+license = "MIT"
+
+[[bin]]
+name = "diet-code"
+path = "src/main.rs"
+
+[dependencies]
+diet-code-core = { path = "../diet-code-core" }
+clap = { version = "4", features = ["derive"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"

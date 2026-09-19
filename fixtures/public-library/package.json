@@ -1,0 +1,7 @@
+{
+  "name": "my-lib",
+  "main": "dist/plugin.js",
+  "exports": {
+    ".": "./dist/plugin.js"
+  }
+}

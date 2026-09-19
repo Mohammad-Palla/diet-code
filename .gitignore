@@ -1,0 +1,35 @@
+# Rust build output
+/target/
+**/target/
+
+# Cargo lock for libraries is committed for binaries-workspaces; keep it.
+# (Uncomment the next line if you prefer library convention:)
+# Cargo.lock
+
+# Diet Code local analysis/benchmark output (regenerable)
+.diet-code/
+benchmark-run.log
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Node artifacts (fixtures/benchmark subjects only; never committed)
+node_modules/
+
+# Env / secrets — NEVER commit credentials
+.env
+.env.*
+*.pem
+*.key
+
+# Coverage / profiling
+lcov.info
+*.profraw
+*.profdata
+tarpaulin-report.html
