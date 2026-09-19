@@ -1,0 +1,142 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.1.0); must match Cargo.toml"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux: fully static musl binaries (no glibc dependency).
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: diet-code-x86_64-unknown-linux-musl
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            asset: diet-code-aarch64-unknown-linux-musl
+          # macOS: one runner builds both slices.
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset: diet-code-x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: diet-code-aarch64-apple-darwin
+          # Windows.
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: diet-code-x86_64-pc-windows-msvc.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+            echo "CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        run: cargo build --release --locked -p diet-code-cli --target ${{ matrix.target }}
+
+      - name: Stage asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          ext=""
+          case "${{ matrix.target }}" in *windows*) ext=".exe";; esac
+          bin="target/${{ matrix.target }}/release/diet-code${ext}"
+          mkdir -p dist
+          cp "$bin" "dist/${{ matrix.asset }}"
+
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ] || [ "${{ matrix.os }}" = "macos-latest" ]; then
+            ./dist/${{ matrix.asset }} --version
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum diet-code-* > checksums.txt && cat checksums.txt
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: |
+            dist/diet-code-*
+            dist/checksums.txt
+          generate_release_notes: true
+
+  npm:
+    name: publish npm wrapper
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Sync npm version to the release tag
+        working-directory: npm/diet-code
+        run: |
+          tag="${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}"
+          version="${tag#v}"
+          node -e "const fs=require('fs');const p=require('./package.json');p.version='$version';fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n')"
+          cp ../../LICENSE LICENSE
+
+      - name: Publish to npm
+        working-directory: npm/diet-code
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

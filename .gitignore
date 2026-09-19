@@ -22,6 +22,12 @@ Thumbs.db
 # Node artifacts (fixtures/benchmark subjects only; never committed)
 node_modules/
 
+# Downloaded prebuilt binaries staged by the npm postinstall (never committed)
+npm/diet-code/bin/vendor/
+
+# npm pack output
+*.tgz
+
 # Env / secrets — NEVER commit credentials
 .env
 .env.*

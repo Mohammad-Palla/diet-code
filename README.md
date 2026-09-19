@@ -46,12 +46,32 @@ analyzer** — `cargo run` works with no API key, no model, no network.
 
 ## Installation
 
-Prerequisites: Rust stable + Cargo.
+You do **not** need Rust. Diet Code ships as a self-contained binary through
+npm (and a shell installer); the Rust toolchain is only for building from
+source.
 
 ```bash
-cargo install --path crates/diet-code-cli
-diet-code --help
+# npm (recommended — Node 18+, no Rust, no native build)
+npm install -g diet-code
+npx diet-code analyze .          # or run without installing
 ```
+
+```bash
+# shell installer (Linux/macOS, installs to ~/.local/bin, verifies checksum)
+curl -fsSL https://raw.githubusercontent.com/Mohammad-Palla/diet-code/master/scripts/install.sh | sh
+```
+
+```bash
+# from source (Rust stable)
+cargo install diet-code-cli          # from crates.io
+cargo install --path crates/diet-code-cli   # from a checkout
+```
+
+The npm package downloads the prebuilt binary for your platform
+(linux/macOS/Windows × x64/arm64) and verifies its SHA-256 checksum; the
+launcher is a ~50-line zero-dependency shim that execs the Rust binary.
+Overrides: `DIET_CODE_SKIP_DOWNLOAD=1`, `DIET_CODE_DOWNLOAD_BASE_URL=…`,
+`DIET_CODE_BINARY_PATH=/path/to/diet-code`.
 
 ## CLI usage
 

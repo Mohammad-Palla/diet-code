@@ -1,0 +1,38 @@
+{
+  "name": "diet-code",
+  "version": "0.1.0",
+  "description": "Put your AI coding agent on a diet — deterministic dead-code analyzer, cleanup, and agent benchmark for TypeScript/JavaScript. Self-contained Rust binary, zero runtime dependencies.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mohammad-Palla/diet-code.git"
+  },
+  "homepage": "https://github.com/Mohammad-Palla/diet-code#readme",
+  "keywords": [
+    "dead-code",
+    "static-analysis",
+    "refactoring",
+    "ai",
+    "cli",
+    "tree-sitter"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "diet-code": "./bin/diet-code.js"
+  },
+  "files": [
+    "bin/",
+    "install.js",
+    "platforms.json",
+    "smoke-test.cjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node install.js",
+    "smoke": "node smoke-test.cjs",
+    "prepack": "node -e \"const p=require('./package.json');const fs=require('fs');if(!fs.existsSync('./LICENSE')){throw new Error('LICENSE missing from package')}console.log('pack OK', p.name+'@'+p.version)\""
+  }
+}
