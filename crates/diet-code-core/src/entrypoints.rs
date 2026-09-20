@@ -336,6 +336,27 @@ pub fn discover_entrypoints(root: &Path, all_files: &[String], config: &DietConf
         }
     }
 
+    // 3b. Nested source-root conventions. Projects without a package.json
+    // (e.g. a Go/Rust app with an ES-module `web/` frontend built by a
+    // bundler script) still root their module graph at a conventional
+    // `<dir>/src/main.*` or `<dir>/src/index.*`. Treat such files as weak
+    // production roots at any depth so their transitive imports are reachable.
+    // Conservative: only the well-known bundler entry basenames, and only
+    // inside a directory literally named `src`.
+    for f in &set {
+        if is_nested_source_entry(f) {
+            out.production.insert(f.clone());
+        }
+    }
+
+    // 3c. HTML `<script src>` entry points. An HTML file that loads a local
+    // script is a deterministic web entry signal (served bundles, module
+    // entries). Resolve the referenced script to a repo file and treat it as
+    // a production root. This is a FACT (the browser loads it), never a guess.
+    for f in html_script_entries(root, &set) {
+        out.production.insert(f);
+    }
+
     // 4. Tests form separate root set.
     for f in all_files {
         if is_test_file(f) {
@@ -344,6 +365,235 @@ pub fn discover_entrypoints(root: &Path, all_files: &[String], config: &DietConf
     }
 
     out
+}
+
+/// Whether `rel` is a conventional module-graph entry nested under a `src`
+/// directory (e.g. `web/src/main.js`, `frontend/src/index.ts`). Conservative:
+/// requires a parent segment literally named `src` and a well-known bundler
+/// entry basename. Root-level `src/...` is already handled by the flat
+/// convention list; this covers projects with no package.json whose frontend
+/// lives in a subdirectory built by a bundler script.
+fn is_nested_source_entry(rel: &str) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    // Need at least `<dir>/src/<file>` (depth >= 3) so we don't double-handle
+    // the flat `src/main.js` conventions or match a bare `main.js`.
+    if parts.len() < 3 {
+        return false;
+    }
+    let file = parts[parts.len() - 1];
+    let parent = parts[parts.len() - 2];
+    if parent != "src" {
+        return false;
+    }
+    matches!(
+        file,
+        "main.ts"
+            | "main.tsx"
+            | "main.js"
+            | "main.jsx"
+            | "main.mjs"
+            | "index.ts"
+            | "index.tsx"
+            | "index.js"
+            | "index.jsx"
+            | "index.mjs"
+    )
+}
+
+/// Scan HTML files for `<script src="...">` and resolve each referenced local
+/// script to a repo file. Returns the set of resolved production entries.
+///
+/// Resolution rules (all deterministic, no guessing beyond checkable facts):
+/// - Ignore external scripts (`http:`, `https:`, `//cdn...`, `data:`).
+/// - Relative `src` (`./app.js`, `src/main.js`) resolves against the HTML
+///   file's own directory.
+/// - Server-absolute `src` (`/static/app.js`) is a served path: try resolving
+///   against the HTML dir after stripping a leading well-known static mount
+///   segment (`static`, `assets`, `public`, `dist`, `build`, `js`), and fall
+///   back to a unique basename match anywhere in the repo.
+fn html_script_entries(root: &Path, files: &HashSet<String>) -> HashSet<String> {
+    let mut out = HashSet::new();
+    // HTML files are not part of the parsed source set (only JS/TS are), so
+    // walk the tree to find them, skipping ignored directories and symlinks.
+    let mut html_files: Vec<String> = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            if ft.is_symlink() {
+                continue;
+            }
+            let rel = crate::parser::to_rel_slash(root, &path);
+            if ft.is_dir() {
+                if !is_default_ignored(&rel) {
+                    stack.push(path);
+                }
+                continue;
+            }
+            let lower = rel.to_ascii_lowercase();
+            if (lower.ends_with(".html") || lower.ends_with(".htm")) && !is_default_ignored(&rel) {
+                html_files.push(rel);
+            }
+        }
+    }
+    for html in html_files {
+        let Ok(text) = std::fs::read_to_string(root.join(&html)) else {
+            continue;
+        };
+        let html_dir = html.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+        for src in extract_script_srcs(&text) {
+            if let Some(resolved) = resolve_script_src(files, html_dir, &src) {
+                out.insert(resolved);
+            }
+        }
+    }
+    out
+}
+
+/// Extract the `src` attribute of every `<script ... src="...">` tag.
+/// Tolerant plain-text scan (no full HTML parser needed): handles single or
+/// double quotes and arbitrary attribute order.
+fn extract_script_srcs(html: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let lower = html.to_ascii_lowercase();
+    let mut idx = 0;
+    while let Some(rel) = lower[idx..].find("<script") {
+        let tag_start = idx + rel;
+        // Find end of this opening tag.
+        let tag_end = lower[tag_start..]
+            .find('>')
+            .map(|e| tag_start + e)
+            .unwrap_or(lower.len());
+        let tag = &html[tag_start..tag_end];
+        if let Some(src) = find_attr(tag, "src") {
+            out.push(src);
+        }
+        idx = tag_end + 1;
+        if idx >= lower.len() {
+            break;
+        }
+    }
+    out
+}
+
+/// Find `attr="value"` or `attr='value'` inside a tag substring.
+fn find_attr(tag: &str, attr: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let mut search = 0;
+    while let Some(pos) = lower[search..].find(attr) {
+        let at = search + pos;
+        // Ensure it's a standalone attribute (preceded by whitespace).
+        let ok_prefix = at == 0 || tag.as_bytes()[at - 1].is_ascii_whitespace();
+        let after = at + attr.len();
+        let rest = &tag[after..];
+        let rest_trimmed = rest.trim_start();
+        if ok_prefix && rest_trimmed.starts_with('=') {
+            let val = rest_trimmed[1..].trim_start();
+            let quote = val.chars().next()?;
+            if quote == '"' || quote == '\'' {
+                let end = val[1..].find(quote)? + 1;
+                return Some(val[1..end].to_string());
+            }
+        }
+        search = after;
+    }
+    None
+}
+
+fn resolve_script_src(files: &HashSet<String>, html_dir: &str, src: &str) -> Option<String> {
+    let src = src.trim();
+    if src.is_empty() {
+        return None;
+    }
+    // External / non-file sources.
+    let lower = src.to_ascii_lowercase();
+    if lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("//")
+        || lower.starts_with("data:")
+        || lower.starts_with("blob:")
+    {
+        return None;
+    }
+    // Strip query/hash.
+    let clean = src.split(['?', '#']).next().unwrap_or(src);
+    // Only resolve script-like assets.
+    let is_scriptish = ["js", "mjs", "cjs", "ts", "jsx", "tsx"]
+        .iter()
+        .any(|e| clean.to_ascii_lowercase().ends_with(&format!(".{e}")));
+    if !is_scriptish {
+        return None;
+    }
+
+    if let Some(server_abs) = clean.strip_prefix('/') {
+        // Served path (`/static/app.js`). Try stripping a well-known mount
+        // segment, resolving against the HTML's directory.
+        let mount_segments = [
+            "static", "assets", "public", "dist", "build", "js", "scripts",
+        ];
+        let mut candidates = Vec::new();
+        if let Some((first, rest)) = server_abs.split_once('/') {
+            if mount_segments.contains(&first) {
+                candidates.push(join_rel(html_dir, rest));
+                candidates.push(rest.to_string());
+            }
+        }
+        candidates.push(join_rel(html_dir, server_abs));
+        candidates.push(server_abs.to_string());
+        for c in candidates {
+            let norm = normalize_rel(&c);
+            if files.contains(&norm) {
+                return Some(norm);
+            }
+        }
+        // Fall back to a UNIQUE basename match (avoid ambiguity).
+        let base = server_abs.rsplit('/').next().unwrap_or(server_abs);
+        let matches: Vec<&String> = files
+            .iter()
+            .filter(|f| f.rsplit('/').next() == Some(base))
+            .collect();
+        if matches.len() == 1 {
+            return Some(matches[0].clone());
+        }
+        return None;
+    }
+
+    // Relative to the HTML directory.
+    let joined = join_rel(html_dir, clean);
+    let norm = normalize_rel(&joined);
+    if files.contains(&norm) {
+        return Some(norm);
+    }
+    None
+}
+
+fn join_rel(dir: &str, rel: &str) -> String {
+    if dir.is_empty() {
+        rel.to_string()
+    } else {
+        format!("{dir}/{rel}")
+    }
+}
+
+/// Normalize a slash path: resolve `.` and `..` segments, drop leading `./`.
+fn normalize_rel(path: &str) -> String {
+    let mut stack: Vec<&str> = Vec::new();
+    for seg in path.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                stack.pop();
+            }
+            s => stack.push(s),
+        }
+    }
+    stack.join("/")
 }
 
 fn normalize_entry(root: &Path, ep: &str) -> String {

@@ -314,6 +314,46 @@ fn mixed_ts_js_cross_references() {
     assert!(!has(&r, FindingKind::DeadFunction, "f"));
 }
 
+/// A project with no package.json whose frontend is a nested ES-module tree
+/// (`web/src/main.js`) loaded via an HTML `<script src>` bundle. Before the
+/// entry-discovery fix, transitively-imported modules were falsely flagged
+/// HIGH `dead_file` ("0 production importers"). Both sides must hold:
+/// transitively-reachable modules are LIVE, a true orphan is still reported.
+#[test]
+fn html_entry_web_reachability() {
+    let r = analyze("html-entry-web");
+
+    // Live side: nothing on the reachable chain is a dead file.
+    for live in [
+        "web/app.js",
+        "web/src/main.js",
+        "web/src/feature.js",
+        "web/src/deep.js",
+    ] {
+        assert!(
+            !has(&r, FindingKind::DeadFile, live),
+            "{live} must be live (reachable), got {:?}",
+            kinds(&r)
+        );
+    }
+
+    // Specifically: the transitively-imported module must never be auto-removable.
+    assert!(
+        !auto_removable(&r)
+            .iter()
+            .any(|f| f.file == "web/src/deep.js"),
+        "transitively-imported deep.js must never be auto-removable: {:?}",
+        kinds(&r)
+    );
+
+    // Dead side: the true orphan is still reported.
+    assert!(
+        has(&r, FindingKind::DeadFile, "web/src/orphan.js"),
+        "orphan.js must be reported dead, got {:?}",
+        kinds(&r)
+    );
+}
+
 /// Differential validation oracle (development only).
 /// If `fossil-mcp` is installed locally it is used as a test oracle to surface
 /// missing graph edges / false positives. Never required: all other tests must
