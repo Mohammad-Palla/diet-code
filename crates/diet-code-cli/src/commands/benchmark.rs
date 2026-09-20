@@ -112,59 +112,95 @@ impl AgentRunParser for ClaudeParser {
     }
 
     fn parse(&self, stdout: &str, stderr: &str, workdir: &Path) -> ParsedTelemetry {
-        // Best effort, version-tolerant:
-        // 1. Streamed JSON lines with usage fields.
+        // Claude Code (>=2.x) `--output-format stream-json --verbose` emits, per
+        // line: `system` events, `assistant`/`user` messages (each with a
+        // `message.usage` and `message.content[]`), and a final `result` event
+        // carrying the authoritative cumulative `usage` + `num_turns`.
+        //
+        // Token accounting matches the project methodology: the true input cost
+        // is fresh input PLUS cache creation/read (comparing raw `input_tokens`
+        // alone rewards warm caches, not smaller repos). We therefore sum
+        //   input_tokens + cache_creation_input_tokens + cache_read_input_tokens.
         let mut tel = ParsedTelemetry::default();
+        let mut result_input: Option<u64> = None;
+        let mut result_output: Option<u64> = None;
+        let mut tool_calls: u64 = 0;
+        let mut files_read: u64 = 0;
+
+        // Helper: total input from a usage object (fresh + cache creation + read).
+        let input_of = |u: &serde_json::Value| -> u64 {
+            let g = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+            g("input_tokens") + g("cache_creation_input_tokens") + g("cache_read_input_tokens")
+        };
+
         for line in stdout.lines().chain(stderr.lines()) {
             let line = line.trim();
             if !line.starts_with('{') {
                 continue;
             }
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                // `{"usage":{"input_tokens":..,"output_tokens":..}}` or message.usage
-                for u in [
-                    v.get("usage"),
-                    v.get("message").and_then(|m| m.get("usage")),
-                    v.get("metrics").and_then(|m| m.get("usage")),
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    if tel.input_tokens.is_none() {
-                        tel.input_tokens = u.get("input_tokens").and_then(|x| x.as_u64());
-                    }
-                    if tel.output_tokens.is_none() {
-                        tel.output_tokens = u.get("output_tokens").and_then(|x| x.as_u64());
-                    }
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            let ty = v.get("type").and_then(|t| t.as_str());
+
+            // Authoritative cumulative totals from the final result event.
+            if ty == Some("result") {
+                if let Some(u) = v.get("usage") {
+                    result_input = Some(input_of(u));
+                    result_output = u.get("output_tokens").and_then(|x| x.as_u64());
                 }
-                // tool_use counting
-                if let Some(content) = v
-                    .get("message")
-                    .and_then(|m| m.get("content"))
-                    .and_then(|c| c.as_array())
-                {
-                    for item in content {
-                        if item.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
-                            tel.tool_calls = Some(tel.tool_calls.unwrap_or(0) + 1);
+            }
+
+            // Count tool_use items (and classify file-exploration tools) from
+            // assistant message content. This is per-turn, so it accumulates.
+            if let Some(content) = v
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for item in content {
+                    if item.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                        tool_calls += 1;
+                        let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                        if matches!(name, "Read" | "Glob" | "Grep" | "LS" | "NotebookRead") {
+                            files_read += 1;
                         }
                     }
                 }
-                if v.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
-                    tel.tool_calls = Some(tel.tool_calls.unwrap_or(0) + 1);
-                }
+            }
+            // Bare top-level tool_use events (older shape).
+            if ty == Some("tool_use") {
+                tool_calls += 1;
             }
         }
-        // 2. Local session files (~/.claude/projects/...) — best effort, never fail.
+
+        // Prefer the result event's cumulative usage; it is the single source of
+        // truth. (Per-assistant usage lines are per-turn snapshots that would
+        // need summing and can double-count cache reads.)
+        tel.input_tokens = result_input;
+        tel.output_tokens = result_output;
+        if tool_calls > 0 {
+            tel.tool_calls = Some(tool_calls);
+        }
+        if files_read > 0 {
+            tel.files_read = Some(files_read);
+        }
+
+        // Fallback: local session files (~/.claude/projects/...), best effort.
         if tel.input_tokens.is_none() {
             if let Some(sess) = newest_session_file() {
                 if let Ok(t) = parse_claude_session(&sess) {
                     if t.input_tokens.is_some() {
+                        // Keep any tool/file counts we already derived.
+                        let (tc, fr) = (tel.tool_calls, tel.files_read);
                         tel = t;
+                        tel.tool_calls = tel.tool_calls.or(tc);
+                        tel.files_read = tel.files_read.or(fr);
                     }
                 }
             }
         }
-        // 3. files_read: count File/Read tool mentions in transcript (rough).
+        // Last-resort files_read heuristic if still unknown.
         if tel.files_read.is_none() {
             let n = count_tool_mentions(stdout, stderr, &["Read", "Glob", "Grep"]);
             if n > 0 {
@@ -300,9 +336,14 @@ fn parse_claude_session(path: &Path) -> Result<ParsedTelemetry> {
             .into_iter()
             .flatten()
             {
-                tel.input_tokens = u.get("input_tokens").and_then(|x| x.as_u64());
-                tel.output_tokens = u.get("output_tokens").and_then(|x| x.as_u64());
-                if tel.input_tokens.is_some() {
+                // Total input = fresh + cache creation + cache read (see ClaudeParser).
+                let g = |k: &str| u.get(k).and_then(|x| x.as_u64());
+                if let Some(fresh) = g("input_tokens") {
+                    let total = fresh
+                        + g("cache_creation_input_tokens").unwrap_or(0)
+                        + g("cache_read_input_tokens").unwrap_or(0);
+                    tel.input_tokens = Some(total);
+                    tel.output_tokens = g("output_tokens");
                     break;
                 }
             }
