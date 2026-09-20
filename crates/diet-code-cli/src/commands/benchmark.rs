@@ -122,18 +122,19 @@ impl AgentRunParser for ClaudeParser {
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
                 // `{"usage":{"input_tokens":..,"output_tokens":..}}` or message.usage
-                for cand in [
+                for u in [
                     v.get("usage"),
                     v.get("message").and_then(|m| m.get("usage")),
                     v.get("metrics").and_then(|m| m.get("usage")),
-                ] {
-                    if let Some(u) = cand {
-                        if tel.input_tokens.is_none() {
-                            tel.input_tokens = u.get("input_tokens").and_then(|x| x.as_u64());
-                        }
-                        if tel.output_tokens.is_none() {
-                            tel.output_tokens = u.get("output_tokens").and_then(|x| x.as_u64());
-                        }
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if tel.input_tokens.is_none() {
+                        tel.input_tokens = u.get("input_tokens").and_then(|x| x.as_u64());
+                    }
+                    if tel.output_tokens.is_none() {
+                        tel.output_tokens = u.get("output_tokens").and_then(|x| x.as_u64());
                     }
                 }
                 // tool_use counting
@@ -292,16 +293,17 @@ fn parse_claude_session(path: &Path) -> Result<ParsedTelemetry> {
             continue;
         };
         if tel.input_tokens.is_none() {
-            for cand in [
+            for u in [
                 v.get("usage"),
                 v.get("message").and_then(|m| m.get("usage")),
-            ] {
-                if let Some(u) = cand {
-                    tel.input_tokens = u.get("input_tokens").and_then(|x| x.as_u64());
-                    tel.output_tokens = u.get("output_tokens").and_then(|x| x.as_u64());
-                    if tel.input_tokens.is_some() {
-                        break;
-                    }
+            ]
+            .into_iter()
+            .flatten()
+            {
+                tel.input_tokens = u.get("input_tokens").and_then(|x| x.as_u64());
+                tel.output_tokens = u.get("output_tokens").and_then(|x| x.as_u64());
+                if tel.input_tokens.is_some() {
+                    break;
                 }
             }
         }
@@ -730,35 +732,20 @@ fn apply_deterministic_plan(
             std::fs::remove_file(&p).ok();
         }
     }
-    let mut by_file: HashMap<&str, Vec<_>> = HashMap::new();
+    let mut by_file: HashMap<&str, Vec<diet_code_core::edits::SymbolRemoval>> = HashMap::new();
     for s in &plan.remove_symbols {
-        by_file.entry(s.file.as_str()).or_default().push(s);
+        by_file.entry(s.file.as_str()).or_default().push(s.clone());
     }
     for (file, mut syms) in by_file {
-        syms.sort_by(|a, b| b.start_byte.cmp(&a.start_byte));
         let abs = workdir.join(file);
         if !abs.exists() {
             continue;
         }
-        let mut text = std::fs::read_to_string(&abs).unwrap_or_default();
-        for s in syms {
-            if s.start_byte < text.len() && s.end_byte <= text.len() && s.start_byte < s.end_byte {
-                let bytes = text.as_bytes();
-                let mut bs = s.start_byte;
-                while bs > 0 && bytes[bs - 1] != b'\n' {
-                    bs -= 1;
-                }
-                let mut be = s.end_byte;
-                while be < bytes.len() && bytes[be] != b'\n' {
-                    be += 1;
-                }
-                if be < bytes.len() {
-                    be += 1;
-                }
-                text = format!("{}{}", &text[..bs], &text[be..]);
-            }
+        let text = std::fs::read_to_string(&abs).unwrap_or_default();
+        // Same deterministic removal as `clean` (stale ranges keep the file).
+        if let Ok(next) = diet_code_core::edits::apply_symbol_removals(&text, &mut syms) {
+            std::fs::write(&abs, next).ok();
         }
-        std::fs::write(&abs, text).ok();
     }
     Ok(())
 }
@@ -931,7 +918,7 @@ fn print_report(reports: &[TaskReport], runs: &[RunMetrics]) {
             let xs: Vec<f64> = runs
                 .iter()
                 .filter(|x| x.task == task && x.branch == branch)
-                .filter_map(|x| f(x))
+                .filter_map(f)
                 .collect();
             if xs.is_empty() {
                 return "n/a".to_string();

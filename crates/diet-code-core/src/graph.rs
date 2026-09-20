@@ -79,13 +79,14 @@ impl Graph {
     }
 }
 
-/// Registry of local import bindings per file: local_name -> (resolved_file, original_name, is_type_only).
-pub type BindingMap = HashMap<String, HashMap<String, (String, String, bool)>>;
+/// Registry of local import bindings per file:
+/// file -> local_name -> (resolved_file, original_name, is_type_only).
+pub type BindingMap = HashMap<String, HashMap<String, (Option<String>, String, bool)>>;
 /// file -> local_name -> (resolved_file, original_name, is_type)
 pub fn build_binding_maps(
     imports: &[crate::imports::ImportRec],
-) -> HashMap<String, HashMap<String, (Option<String>, String, bool)>> {
-    let mut m: HashMap<String, HashMap<String, (Option<String>, String, bool)>> = HashMap::new();
+) -> BindingMap {
+    let mut m: BindingMap = HashMap::new();
     for imp in imports {
         if imp.kind == crate::imports::ImportKind::SideEffect {
             continue;
@@ -119,7 +120,7 @@ pub fn build_binding_maps(
 pub fn resolve_references(
     graph: &mut Graph,
     references: &[ReferenceRec],
-    bindings: &HashMap<String, HashMap<String, (Option<String>, String, bool)>>,
+    bindings: &BindingMap,
     reexport_targets: &HashMap<(String, String), Vec<(String, String)>>,
     namespace_imports: &HashMap<String, HashMap<String, String>>,
     _file_exports: &HashMap<String, HashSet<String>>,
@@ -158,10 +159,7 @@ pub fn resolve_references(
             | crate::imports::RefContext::New
             | crate::imports::RefContext::Identifier
             | crate::imports::RefContext::TypePosition => {
-                let edge_kind = match r.kind {
-                    RefKind::Type => RefKind::Type,
-                    RefKind::Value => RefKind::Value,
-                };
+                let edge_kind = r.kind;
                 // 1b. Lexically nested declarations shadow imports: an inner
                 // `const schemas` wins over `import * as schemas` in that scope.
                 // (Top-level conflicts would be a redeclaration SyntaxError, so
@@ -525,9 +523,10 @@ fn this_scope(graph: &Graph, from_symbol: &str) -> Option<(String, String)> {
 /// known class type, a class name visible in the file (static calls), or a
 /// same-file variable owning an object literal with that method.
 /// Conservative: links only when the (owner, method) pair resolves in scope.
+#[allow(clippy::too_many_arguments)]
 fn resolve_method_receiver(
     graph: &Graph,
-    bindings: &HashMap<String, HashMap<String, (Option<String>, String, bool)>>,
+    bindings: &BindingMap,
     var_types: &HashMap<(String, String), String>,
     global_types: &HashMap<String, String>,
     file: &str,
@@ -540,7 +539,7 @@ fn resolve_method_receiver(
     if let Some(rest) = base.strip_prefix("new ") {
         let cls = rest
             .trim()
-            .trim_end_matches(|ch| ch == '(' || ch == ')')
+            .trim_end_matches(['(', ')'])
             .split('(')
             .next()
             .unwrap_or("")
@@ -577,29 +576,22 @@ fn resolve_method_receiver(
         }
     }
     // Imported class name used statically: `import { Service } from ...; Service.create()`.
-    if base
-        .chars()
-        .next()
-        .map(|c| c.is_uppercase())
-        .unwrap_or(false)
-    {
+    if base.chars().next().is_some_and(|c| c.is_uppercase()) {
         if let Some(fb) = bindings.get(file) {
-            if let Some((target_opt, orig, _)) = fb.get(base) {
-                if let Some(target) = target_opt {
-                    let class_name = if orig == "default" {
-                        "default"
-                    } else {
-                        orig.as_str()
-                    };
-                    if let Some(class_id) = graph
-                        .symbol_by_file_name
-                        .get(&(target.clone(), class_name.to_string()))
-                        .cloned()
-                    {
-                        if graph.kinds.get(&class_id) == Some(&SymbolKind::Class) {
-                            if let Some(id) = child_in_scope(graph, target, &class_id, method) {
-                                return Some(id);
-                            }
+            if let Some((Some(target), orig, _)) = fb.get(base) {
+                let class_name = if orig == "default" {
+                    "default"
+                } else {
+                    orig.as_str()
+                };
+                if let Some(class_id) = graph
+                    .symbol_by_file_name
+                    .get(&(target.clone(), class_name.to_string()))
+                    .cloned()
+                {
+                    if graph.kinds.get(&class_id) == Some(&SymbolKind::Class) {
+                        if let Some(id) = child_in_scope(graph, target, &class_id, method) {
+                            return Some(id);
                         }
                     }
                 }
@@ -633,7 +625,7 @@ fn resolve_method_receiver(
 
 fn find_class_method(
     graph: &Graph,
-    bindings: &HashMap<String, HashMap<String, (Option<String>, String, bool)>>,
+    bindings: &BindingMap,
     file: &str,
     class: &str,
     method: &str,

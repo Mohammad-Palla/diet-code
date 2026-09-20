@@ -67,9 +67,9 @@ pub fn remove_byte_range(text: &str, start: usize, end: usize) -> anyhow::Result
 /// they are applied in descending byte order for stability.
 pub fn apply_symbol_removals(
     text: &str,
-    removals: &mut Vec<SymbolRemoval>,
+    removals: &mut [SymbolRemoval],
 ) -> anyhow::Result<String> {
-    removals.sort_by(|a, b| b.start_byte.cmp(&a.start_byte));
+    removals.sort_by_key(|r| std::cmp::Reverse(r.start_byte));
     let mut out = text.to_string();
     for r in removals.iter() {
         out = remove_byte_range(&out, r.start_byte, r.end_byte)?;

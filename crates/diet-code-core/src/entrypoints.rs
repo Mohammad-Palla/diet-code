@@ -469,26 +469,14 @@ fn collect_exports_targets(v: &serde_json::Value, out: &mut Vec<String>) {
             }
         }
         serde_json::Value::Object(map) => {
-            for (k, val) in map {
-                if k.starts_with('.') {
-                    collect_exports_targets(val, out);
-                } else if matches!(
-                    k.as_str(),
-                    "import" | "require" | "default" | "types" | "node" | "browser"
-                ) {
-                    collect_exports_targets(val, out);
-                } else {
-                    // subpath keys like "./foo" handled above; unknown condition keys: still recurse.
-                    collect_exports_targets(val, out);
-                }
+            // All branches recurse: subpath keys ("./foo"), known conditions
+            // ("import"/"require"/...), and unknown condition keys alike.
+            for val in map.values() {
+                collect_exports_targets(val, out);
             }
         }
         _ => {}
     }
-}
-
-fn match_to_file(root: &Path, files: &HashSet<String>, target: &str) -> Option<String> {
-    match_to_file_in(root, root, files, target)
 }
 
 /// Match a package entry target to a repo file, resolving relative to the

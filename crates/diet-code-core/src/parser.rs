@@ -1409,68 +1409,65 @@ impl<'a> Visitor<'a> {
         let mut cursor = node.walk();
         let children: Vec<Node> = node.children(&mut cursor).collect();
         for child in &children {
-            match child.kind() {
-                "import_clause" => {
-                    let mut c2 = child.walk();
-                    let parts: Vec<Node> = child.children(&mut c2).collect();
-                    for p in &parts {
-                        match p.kind() {
-                            "identifier" => {
-                                // default import: `import foo from`
-                                let local = self.text(p).to_string();
-                                self.imports.push(ImportRec {
-                                    from_file: self.rel_path.clone(),
-                                    source_raw: source_raw.clone(),
-                                    resolved_file: None,
-                                    local_name: local,
-                                    original_name: "default".to_string(),
-                                    is_type_only,
-                                    kind: ImportKind::Default,
-                                    line,
-                                });
-                                found_any = true;
-                            }
-                            "namespace_import" => {
-                                // `* as ns`
-                                let ns = last_identifier_text(self.source, p)
-                                    .unwrap_or("ns".to_string());
-                                self.imports.push(ImportRec {
-                                    from_file: self.rel_path.clone(),
-                                    source_raw: source_raw.clone(),
-                                    resolved_file: None,
-                                    local_name: ns,
-                                    original_name: "*".to_string(),
-                                    is_type_only,
-                                    kind: ImportKind::Namespace,
-                                    line,
-                                });
-                                found_any = true;
-                            }
-                            "named_imports" => {
-                                let mut c3 = p.walk();
-                                let specs: Vec<Node> = p.children(&mut c3).collect();
-                                for s in &specs {
-                                    if s.kind() == "import_specifier" {
-                                        let (orig, local) = import_specifier_names(self.source, s);
-                                        self.imports.push(ImportRec {
-                                            from_file: self.rel_path.clone(),
-                                            source_raw: source_raw.clone(),
-                                            resolved_file: None,
-                                            local_name: local,
-                                            original_name: orig,
-                                            is_type_only: is_type_only || spec_is_type(s),
-                                            kind: ImportKind::Named,
-                                            line,
-                                        });
-                                        found_any = true;
-                                    }
+            if child.kind() == "import_clause" {
+                let mut c2 = child.walk();
+                let parts: Vec<Node> = child.children(&mut c2).collect();
+                for p in &parts {
+                    match p.kind() {
+                        "identifier" => {
+                            // default import: `import foo from`
+                            let local = self.text(p).to_string();
+                            self.imports.push(ImportRec {
+                                from_file: self.rel_path.clone(),
+                                source_raw: source_raw.clone(),
+                                resolved_file: None,
+                                local_name: local,
+                                original_name: "default".to_string(),
+                                is_type_only,
+                                kind: ImportKind::Default,
+                                line,
+                            });
+                            found_any = true;
+                        }
+                        "namespace_import" => {
+                            // `* as ns`
+                            let ns = last_identifier_text(self.source, p)
+                                .unwrap_or("ns".to_string());
+                            self.imports.push(ImportRec {
+                                from_file: self.rel_path.clone(),
+                                source_raw: source_raw.clone(),
+                                resolved_file: None,
+                                local_name: ns,
+                                original_name: "*".to_string(),
+                                is_type_only,
+                                kind: ImportKind::Namespace,
+                                line,
+                            });
+                            found_any = true;
+                        }
+                        "named_imports" => {
+                            let mut c3 = p.walk();
+                            let specs: Vec<Node> = p.children(&mut c3).collect();
+                            for s in &specs {
+                                if s.kind() == "import_specifier" {
+                                    let (orig, local) = import_specifier_names(self.source, s);
+                                    self.imports.push(ImportRec {
+                                        from_file: self.rel_path.clone(),
+                                        source_raw: source_raw.clone(),
+                                        resolved_file: None,
+                                        local_name: local,
+                                        original_name: orig,
+                                        is_type_only: is_type_only || spec_is_type(s),
+                                        kind: ImportKind::Named,
+                                        line,
+                                    });
+                                    found_any = true;
                                 }
                             }
-                            _ => {}
                         }
+                        _ => {}
                     }
                 }
-                _ => {}
             }
         }
         if !found_any {
@@ -1757,10 +1754,10 @@ impl<'a> Visitor<'a> {
         }
         let func = node.child_by_field_name("function");
         let args = node.child_by_field_name("arguments");
-        if let Some(f) = func.clone() {
+        if let Some(f) = func {
             // `import("...")` may parse as a call whose function is the `import` keyword.
             if f.kind() == "import" {
-                if let Some(a) = args.clone() {
+                if let Some(a) = args {
                     if let Some(lit) = first_string_arg(self.source, &a) {
                         self.imports.push(ImportRec {
                             from_file: self.rel_path.clone(),
@@ -1791,7 +1788,7 @@ impl<'a> Visitor<'a> {
                 let (obj, prop) = member_parts(self.source, &f);
                 if let (Some(o), Some(p)) = (obj, prop) {
                     if p == "resolve" && o.ends_with("import.meta") {
-                        if let Some(a) = args.clone() {
+                        if let Some(a) = args {
                             if let Some(lit) = first_string_arg(self.source, &a) {
                                 self.imports.push(ImportRec {
                                     from_file: self.rel_path.clone(),
@@ -1882,7 +1879,7 @@ impl<'a> Visitor<'a> {
                                     line: self.line(node),
                                 });
                             } else {
-                                if let Some(a2) = args.clone() {
+                                if let Some(a2) = args {
                                     if let Some(pre) = dynamic_prefix_of_arg(self.source, &a2) {
                                         self.record_dynamic_prefix(&pre);
                                     }
@@ -1959,7 +1956,7 @@ impl<'a> Visitor<'a> {
         if let Some(ctor) = node.child_by_field_name("constructor") {
             let t = self.text(&ctor).to_string();
             // ctor may be `Foo` or `ns.Foo`
-            let name = t.split('.').last().unwrap_or(&t).trim().to_string();
+            let name = t.split('.').next_back().unwrap_or(&t).trim().to_string();
             let base = if t.contains('.') {
                 t.split('.').next().map(|s| s.to_string())
             } else {
@@ -1989,7 +1986,7 @@ impl<'a> Visitor<'a> {
                 "nested_identifier" | "jsx_namespace_name" | "jsx_nested_identifier" => {
                     let full = self.text(c).to_string();
                     let first = full
-                        .split(|ch| ch == '.' || ch == ':')
+                        .split(['.', ':'])
                         .next()
                         .unwrap_or(&full);
                     if first
@@ -2051,7 +2048,7 @@ impl<'a> Visitor<'a> {
             } else {
                 // source is non-literal expression
                 if src.kind() == "template_string" {
-                    if let Some(t) = src.utf8_text(self.source.as_bytes()).ok() {
+                    if let Ok(t) = src.utf8_text(self.source.as_bytes()) {
                         if let Some(pre) = t.split("${").next().map(|s| s.trim_matches('`')) {
                             if !pre.is_empty() {
                                 self.record_dynamic_prefix(pre);
@@ -2072,7 +2069,7 @@ impl<'a> Visitor<'a> {
             let children: Vec<Node> = node.children(&mut cursor).collect();
             for c in &children {
                 if c.kind() == "string" || c.kind() == "string_fragment" {
-                    if let Some(lit) = string_literal_value(self.source, &c) {
+                    if let Some(lit) = string_literal_value(self.source, c) {
                         found_literal = Some(lit);
                         break;
                     }
@@ -2566,7 +2563,7 @@ fn destructure_pairs(source: &str, pattern: &Node) -> Vec<(String, String)> {
                     match k.kind() {
                         "property_identifier" | "string" | "number" => {
                             if !seen_key {
-                                key = k.utf8_text(source.as_bytes()).ok().map(|s| strip_quotes(s));
+                                key = k.utf8_text(source.as_bytes()).ok().map(strip_quotes);
                                 seen_key = true;
                             }
                         }
@@ -2847,8 +2844,8 @@ fn extract_star_as_name(source: &str, node: &Node) -> Option<String> {
     let after = &text[star + 1..];
     // Expect `as <name>`.
     let after = after.trim_start();
-    if after.starts_with("as") {
-        let rest = after[2..].trim_start();
+    if let Some(rest) = after.strip_prefix("as") {
+        let rest = rest.trim_start();
         let name: String = rest
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')

@@ -399,19 +399,17 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
         }
         if target.is_none() {
             if let Some(fb) = bindings.get(file) {
-                if let Some((resolved, orig, _)) = fb.get(base_name) {
-                    if let Some(t) = resolved {
-                        let cn = if orig == "default" {
-                            "default"
-                        } else {
-                            orig.as_str()
-                        };
-                        if let Some(id) =
-                            graph.symbol_by_file_name.get(&(t.clone(), cn.to_string()))
-                        {
-                            if graph.kinds.get(id) == Some(&SymbolKind::Class) {
-                                target = Some(id.clone());
-                            }
+                if let Some((Some(t), orig, _)) = fb.get(base_name) {
+                    let cn = if orig == "default" {
+                        "default"
+                    } else {
+                        orig.as_str()
+                    };
+                    if let Some(id) =
+                        graph.symbol_by_file_name.get(&(t.clone(), cn.to_string()))
+                    {
+                        if graph.kinds.get(id) == Some(&SymbolKind::Class) {
+                            target = Some(id.clone());
                         }
                     }
                 }
@@ -464,7 +462,7 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
                 found = graph
                     .symbols_by_name
                     .get(cls)
-                    .map(|ids| {
+                    .and_then(|ids| {
                         ids.iter().find(|id| {
                             graph.kinds.get(*id) == Some(&SymbolKind::Class)
                                 && graph
@@ -474,7 +472,6 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
                                     .unwrap_or(false)
                         })
                     })
-                    .flatten()
                     .cloned();
             }
             if let Some(id) = found {
@@ -684,12 +681,11 @@ fn build_reexport_map(
             let target = re.resolved_file.clone().unwrap();
             // Target's export names = direct + already-known re-export keys.
             let mut names: HashSet<String> = direct.get(&target).cloned().unwrap_or_default();
-            for ((f, n), _) in map.iter() {
+            for (f, n) in map.keys() {
                 if f == &target && n != "*" {
                     names.insert(n.clone());
                 }
-            }
-            // `export *` skips default.
+            }            // `export *` skips default.
             names.remove("default");
             for n in names {
                 if n == "*" {
@@ -700,14 +696,15 @@ fn build_reexport_map(
                 if re.exported_name != "*" {
                     // `export * as ns from` -> export name `ns` mapping to wildcard; record once.
                     let ns_key = (re.from_file.clone(), re.exported_name.clone());
-                    if !map.contains_key(&ns_key) {
-                        map.insert(ns_key, vec![(target.clone(), "*".to_string())]);
+                    if map.insert(ns_key, vec![(target.clone(), "*".to_string())]).is_none() {
                         progress = true;
                     }
                     break;
                 }
-                if !map.contains_key(&key) {
-                    map.insert(key, vec![(target.clone(), n.clone())]);
+                if map
+                    .insert(key, vec![(target.clone(), n.clone())])
+                    .is_none()
+                {
                     progress = true;
                 }
             }
@@ -752,7 +749,7 @@ fn build_file_export_names(
                     .insert(re.exported_name.clone());
             } else {
                 // expand members known via map
-                for ((f, n), _) in reexport_map.iter() {
+                for (f, n) in reexport_map.keys() {
                     if f == &re.from_file {
                         m.entry(f.clone()).or_default().insert(n.clone());
                     }
@@ -1275,14 +1272,12 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
             continue;
         }
         // Never report constructors.
+        // (`#private` fields fall through to normal logic: they can be dead.)
         if e.kind == SymbolKind::Method
-            && (e.name == "constructor" || e.name.starts_with('#'))
+            && e.name == "constructor"
             && e.name != "#private-unused"
         {
-            if e.name == "constructor" {
-                continue;
-            }
-            // `#private` fields: fall through to normal logic (they can be dead).
+            continue;
         }
         let (prod_reach, test_reach) = result.reachability.symbol_status(&e.id);
         if prod_reach {
@@ -1591,6 +1586,7 @@ fn has_exported_namespace_ancestor(
     false
 }
 
+#[allow(clippy::too_many_arguments)]
 fn mk_finding(
     file: &str,
     symbol: Option<String>,
