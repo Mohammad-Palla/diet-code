@@ -1,6 +1,6 @@
 {
   "name": "@mohammadpalla/diet-code",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Put your AI coding agent on a diet — deterministic dead-code analyzer, cleanup, and agent benchmark for TypeScript/JavaScript. Self-contained Rust binary, zero runtime dependencies.",
   "license": "MIT",
   "repository": {
