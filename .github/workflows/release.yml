@@ -64,6 +64,7 @@ jobs:
         run: cargo install cargo-zigbuild --locked
 
       - name: Build
+        shell: bash
         run: |
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
             cargo zigbuild --release --locked -p diet-code-cli --target ${{ matrix.target }}
