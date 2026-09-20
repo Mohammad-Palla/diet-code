@@ -1794,6 +1794,13 @@ fn attach_git_evidence(root: &Path, findings: &mut [Finding]) {
     }
 }
 
+/// Git evidence for a single file, for callers that need it outside the
+/// findings pass (e.g. explaining a symbol that is alive and therefore has no
+/// finding attached).
+pub fn git_evidence_for_file(root: &Path, rel: &str) -> GitEvidence {
+    git_evidence_for(root, rel)
+}
+
 fn git_evidence_for(root: &Path, rel: &str) -> GitEvidence {
     let empty = GitEvidence {
         first_seen: None,

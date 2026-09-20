@@ -161,3 +161,62 @@ fn benchmark_mock_runs_base_and_diet() {
         .collect();
     assert!(!entries.is_empty(), "benchmark report must be persisted");
 }
+
+/// `install` registers the skill where Claude Code looks for it.
+#[test]
+fn install_writes_claude_skill() {
+    let dir = temp_repo("unused-file", "install");
+    let (ok, text) = run(&["install", "--path", dir.to_str().unwrap()]);
+    assert!(ok, "install failed:\n{}", text);
+    let skill = dir.join(".claude/skills/diet-code/SKILL.md");
+    let body = std::fs::read_to_string(&skill)
+        .unwrap_or_else(|e| panic!("reading {}: {e}", skill.display()));
+    assert!(body.starts_with("---\n"), "missing frontmatter:\n{}", body);
+    assert!(body.contains("name: diet-code"));
+    assert!(body.contains("# /diet-code"));
+}
+
+/// Re-installing into the shared `AGENTS.md` must not duplicate the block or
+/// disturb what was already in the file.
+#[test]
+fn install_agents_md_is_idempotent() {
+    let dir = temp_repo("unused-file", "install-agents");
+    std::fs::write(dir.join("AGENTS.md"), "# Notes\n\nKeep me.\n").unwrap();
+    for _ in 0..2 {
+        let (ok, text) = run(&[
+            "install",
+            "--agent",
+            "agents",
+            "--path",
+            dir.to_str().unwrap(),
+        ]);
+        assert!(ok, "install failed:\n{}", text);
+    }
+    let body = std::fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+    assert_eq!(body.matches("<!-- diet-code:start -->").count(), 1);
+    assert!(body.contains("Keep me."));
+}
+
+/// `--dry-run` must report the destination without creating anything.
+#[test]
+fn install_dry_run_writes_nothing() {
+    let dir = temp_repo("unused-file", "install-dry");
+    let (ok, text) = run(&["install", "--path", dir.to_str().unwrap(), "--dry-run"]);
+    assert!(ok, "install failed:\n{}", text);
+    assert!(text.contains("would write"), "expected preview:\n{}", text);
+    assert!(!dir.join(".claude").exists(), "dry run created files");
+}
+
+/// Asking about a symbol nothing suspects must answer the question, not report
+/// that no finding matched.
+#[test]
+fn explain_answers_for_a_live_symbol() {
+    let dir = temp_repo("unused-file", "explain-live");
+    let (ok, text) = run(&["explain", "usedHelper", "--path", dir.to_str().unwrap()]);
+    assert!(ok, "explain failed:\n{}", text);
+    assert!(
+        text.contains("KEPT") || text.contains("not an indexed symbol"),
+        "expected a verdict for a live symbol:\n{}",
+        text
+    );
+}
