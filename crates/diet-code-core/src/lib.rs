@@ -405,9 +405,7 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
                     } else {
                         orig.as_str()
                     };
-                    if let Some(id) =
-                        graph.symbol_by_file_name.get(&(t.clone(), cn.to_string()))
-                    {
+                    if let Some(id) = graph.symbol_by_file_name.get(&(t.clone(), cn.to_string())) {
                         if graph.kinds.get(id) == Some(&SymbolKind::Class) {
                             target = Some(id.clone());
                         }
@@ -685,7 +683,7 @@ fn build_reexport_map(
                 if f == &target && n != "*" {
                     names.insert(n.clone());
                 }
-            }            // `export *` skips default.
+            } // `export *` skips default.
             names.remove("default");
             for n in names {
                 if n == "*" {
@@ -696,15 +694,15 @@ fn build_reexport_map(
                 if re.exported_name != "*" {
                     // `export * as ns from` -> export name `ns` mapping to wildcard; record once.
                     let ns_key = (re.from_file.clone(), re.exported_name.clone());
-                    if map.insert(ns_key, vec![(target.clone(), "*".to_string())]).is_none() {
+                    if map
+                        .insert(ns_key, vec![(target.clone(), "*".to_string())])
+                        .is_none()
+                    {
                         progress = true;
                     }
                     break;
                 }
-                if map
-                    .insert(key, vec![(target.clone(), n.clone())])
-                    .is_none()
-                {
+                if map.insert(key, vec![(target.clone(), n.clone())]).is_none() {
                     progress = true;
                 }
             }
@@ -1273,10 +1271,7 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         }
         // Never report constructors.
         // (`#private` fields fall through to normal logic: they can be dead.)
-        if e.kind == SymbolKind::Method
-            && e.name == "constructor"
-            && e.name != "#private-unused"
-        {
+        if e.kind == SymbolKind::Method && e.name == "constructor" && e.name != "#private-unused" {
             continue;
         }
         let (prod_reach, test_reach) = result.reachability.symbol_status(&e.id);

@@ -83,9 +83,7 @@ impl Graph {
 /// file -> local_name -> (resolved_file, original_name, is_type_only).
 pub type BindingMap = HashMap<String, HashMap<String, (Option<String>, String, bool)>>;
 /// file -> local_name -> (resolved_file, original_name, is_type)
-pub fn build_binding_maps(
-    imports: &[crate::imports::ImportRec],
-) -> BindingMap {
+pub fn build_binding_maps(imports: &[crate::imports::ImportRec]) -> BindingMap {
     let mut m: BindingMap = HashMap::new();
     for imp in imports {
         if imp.kind == crate::imports::ImportKind::SideEffect {

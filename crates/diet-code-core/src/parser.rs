@@ -1431,8 +1431,8 @@ impl<'a> Visitor<'a> {
                         }
                         "namespace_import" => {
                             // `* as ns`
-                            let ns = last_identifier_text(self.source, p)
-                                .unwrap_or("ns".to_string());
+                            let ns =
+                                last_identifier_text(self.source, p).unwrap_or("ns".to_string());
                             self.imports.push(ImportRec {
                                 from_file: self.rel_path.clone(),
                                 source_raw: source_raw.clone(),
@@ -1985,10 +1985,7 @@ impl<'a> Visitor<'a> {
                 }
                 "nested_identifier" | "jsx_namespace_name" | "jsx_nested_identifier" => {
                     let full = self.text(c).to_string();
-                    let first = full
-                        .split(['.', ':'])
-                        .next()
-                        .unwrap_or(&full);
+                    let first = full.split(['.', ':']).next().unwrap_or(&full);
                     if first
                         .chars()
                         .next()

@@ -65,10 +65,7 @@ pub fn remove_byte_range(text: &str, start: usize, end: usize) -> anyhow::Result
 
 /// Apply several symbol removals to one file's text. Removals must not overlap;
 /// they are applied in descending byte order for stability.
-pub fn apply_symbol_removals(
-    text: &str,
-    removals: &mut [SymbolRemoval],
-) -> anyhow::Result<String> {
+pub fn apply_symbol_removals(text: &str, removals: &mut [SymbolRemoval]) -> anyhow::Result<String> {
     removals.sort_by_key(|r| std::cmp::Reverse(r.start_byte));
     let mut out = text.to_string();
     for r in removals.iter() {
