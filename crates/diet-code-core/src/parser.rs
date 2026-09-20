@@ -282,7 +282,10 @@ impl<'a> Visitor<'a> {
         // positions. Member/this property names are NOT filtered: any identifier
         // (even `type`) can be a method name, and resolution only links when the
         // receiver provably owns it.
-        if context != RefContext::Member && context != RefContext::ThisMethod && is_builtin_name(name) {
+        if context != RefContext::Member
+            && context != RefContext::ThisMethod
+            && is_builtin_name(name)
+        {
             return;
         }
         self.references.push(ReferenceRec {
@@ -406,8 +409,7 @@ impl<'a> Visitor<'a> {
                 let name = self.text(&name_node).to_string();
                 // `declare module 'pkg'` (quoted name) augments an external/public
                 // module: its members are public surface.
-                let is_ambient_augmentation =
-                    name.starts_with('\'') || name.starts_with('"');
+                let is_ambient_augmentation = name.starts_with('\'') || name.starts_with('"');
                 let e = Entity::new(
                     &self.rel_path,
                     self.abs_path.clone(),
@@ -497,7 +499,8 @@ impl<'a> Visitor<'a> {
                     self.visit_children(node, false);
                 }
                 return;
-            }            "type_identifier" | "generic_type" | "type_query" => {
+            }
+            "type_identifier" | "generic_type" | "type_query" => {
                 // Record type-position refs generically below; avoid double work.
                 self.visit_type_node(node);
                 self.visit_children(node, false);
@@ -849,7 +852,12 @@ impl<'a> Visitor<'a> {
         // creation (their uses are still recorded as references).
         let in_for_init = node
             .parent()
-            .map(|p| matches!(p.kind(), "for_statement" | "for_in_statement" | "for_of_statement"))
+            .map(|p| {
+                matches!(
+                    p.kind(),
+                    "for_statement" | "for_in_statement" | "for_of_statement"
+                )
+            })
             .unwrap_or(false);
         if in_for_init {
             self.visit_children(node, false);
@@ -906,7 +914,13 @@ impl<'a> Visitor<'a> {
                     if let Some(ctor) = v.child_by_field_name("constructor") {
                         let ctxt = self.text(&ctor).to_string();
                         let cls = ctxt.split('.').next().unwrap_or(&ctxt).trim().to_string();
-                        if !cls.is_empty() && cls.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                        if !cls.is_empty()
+                            && cls
+                                .chars()
+                                .next()
+                                .map(|c| c.is_uppercase())
+                                .unwrap_or(false)
+                        {
                             self.var_types.push((name.clone(), cls));
                         }
                     }
@@ -926,20 +940,15 @@ impl<'a> Visitor<'a> {
                 }
                 Some(k) if k == "class" || k == "class_expression" => {
                     // `const Foo = class {}` -> class entity
-                    let (s, e) = if single {                        (node.start_byte(), node.end_byte())
+                    let (s, e) = if single {
+                        (node.start_byte(), node.end_byte())
                     } else {
                         (decl.start_byte(), decl.end_byte())
                     };
                     let (sl, el) = if single {
-                        (
-                            node.start_position().row + 1,
-                            node.end_position().row + 1,
-                        )
+                        (node.start_position().row + 1, node.end_position().row + 1)
                     } else {
-                        (
-                            decl.start_position().row + 1,
-                            decl.end_position().row + 1,
-                        )
+                        (decl.start_position().row + 1, decl.end_position().row + 1)
                     };
                     let en = Entity::new(
                         &self.rel_path,
@@ -972,15 +981,9 @@ impl<'a> Visitor<'a> {
                 (decl.start_byte(), decl.end_byte())
             };
             let (sl, el) = if single {
-                (
-                    node.start_position().row + 1,
-                    node.end_position().row + 1,
-                )
+                (node.start_position().row + 1, node.end_position().row + 1)
             } else {
-                (
-                    decl.start_position().row + 1,
-                    decl.end_position().row + 1,
-                )
+                (decl.start_position().row + 1, decl.end_position().row + 1)
             };
             let en = Entity::new(
                 &self.rel_path,
@@ -1125,8 +1128,7 @@ impl<'a> Visitor<'a> {
             if m.kind() == "method_definition" {
                 if let Some(name_node) = m.child_by_field_name("name") {
                     let n = self.text(&name_node).to_string();
-                    self.surface_methods
-                        .push((n, m.start_position().row + 1));
+                    self.surface_methods.push((n, m.start_position().row + 1));
                 }
             }
         }
@@ -1157,7 +1159,8 @@ impl<'a> Visitor<'a> {
             && base_root != "exports"
             && base_root != "module"
         {
-            self.dynamic_dispatch_bases.push((base_root, self.current_symbol()));
+            self.dynamic_dispatch_bases
+                .push((base_root, self.current_symbol()));
         }
     }
 
@@ -1360,10 +1363,7 @@ impl<'a> Visitor<'a> {
                 self.visit_children(&r, false);
                 self.symbol_stack.pop();
                 return true;
-            } else if matches!(
-                rk,
-                "function" | "function_expression" | "arrow_function"
-            ) {
+            } else if matches!(rk, "function" | "function_expression" | "arrow_function") {
                 // `module.exports = function...` / `=> ...`: the whole module.
                 let ekind = if rk == "arrow_function" {
                     SymbolKind::ArrowFunction
@@ -1399,8 +1399,8 @@ impl<'a> Visitor<'a> {
     fn visit_import_statement(&mut self, node: &Node) {
         let src = child_string_literal(self.source, node, "source");
         let line = self.line(node);
-        let is_type_only = node_text_contains(self.source, node, "import type")
-            || has_type_modifier(node);
+        let is_type_only =
+            node_text_contains(self.source, node, "import type") || has_type_modifier(node);
         let Some(source_raw) = src else {
             return;
         };
@@ -1432,7 +1432,8 @@ impl<'a> Visitor<'a> {
                             }
                             "namespace_import" => {
                                 // `* as ns`
-                                let ns = last_identifier_text(self.source, p).unwrap_or("ns".to_string());
+                                let ns = last_identifier_text(self.source, p)
+                                    .unwrap_or("ns".to_string());
                                 self.imports.push(ImportRec {
                                     from_file: self.rel_path.clone(),
                                     source_raw: source_raw.clone(),
@@ -1492,8 +1493,8 @@ impl<'a> Visitor<'a> {
     fn visit_export_statement(&mut self, node: &Node) {
         let line = self.line(node);
         let source_raw = child_string_literal(self.source, node, "source");
-        let is_type_only = node_text_contains(self.source, node, "export type")
-            || has_type_modifier(node);
+        let is_type_only =
+            node_text_contains(self.source, node, "export type") || has_type_modifier(node);
 
         // `export = foo;` (TS export-assignment; parses as export_statement
         // holding `=` in some grammars): `foo` is the module export.
@@ -1661,7 +1662,8 @@ impl<'a> Visitor<'a> {
                         });
                     }
                 }
-                "comment" | "decorator" | "export" | "default" | "type" | "{" | "}" | "," | ";" => {}
+                "comment" | "decorator" | "export" | "default" | "type" | "{" | "}" | "," | ";" => {
+                }
                 "object" => {
                     // `export default { create() {} }`: surface object methods are public API.
                     if is_default {
@@ -1825,7 +1827,13 @@ impl<'a> Visitor<'a> {
                         if let Some(a) = args {
                             // The callee itself is a usage (keeps `createRequire`
                             // variables alive: `const require = createRequire(...); require("x")`).
-                            self.push_ref(node, "require", None, RefKind::Value, RefContext::Identifier);
+                            self.push_ref(
+                                node,
+                                "require",
+                                None,
+                                RefKind::Value,
+                                RefContext::Identifier,
+                            );
                             if let Some(lit) = first_string_arg(self.source, &a)
                                 .or_else(|| eval_path_call(self.source, &a).flatten())
                             {
@@ -1910,13 +1918,7 @@ impl<'a> Visitor<'a> {
                                     self.line(node)
                                 ));
                             }
-                            self.push_ref(
-                                node,
-                                &method,
-                                obj,
-                                RefKind::Value,
-                                RefContext::Member,
-                            );
+                            self.push_ref(node, &method, obj, RefKind::Value, RefContext::Member);
                         }
                     }
                 }
@@ -1976,14 +1978,26 @@ impl<'a> Visitor<'a> {
                 "identifier" => {
                     let n = self.text(c).to_string();
                     // lowercase = intrinsic element (<div>), skip
-                    if n.chars().next().map(|ch| ch.is_uppercase()).unwrap_or(false) {
+                    if n.chars()
+                        .next()
+                        .map(|ch| ch.is_uppercase())
+                        .unwrap_or(false)
+                    {
                         self.push_ref(node, &n, None, RefKind::Value, RefContext::Jsx);
                     }
                 }
                 "nested_identifier" | "jsx_namespace_name" | "jsx_nested_identifier" => {
                     let full = self.text(c).to_string();
-                    let first = full.split(|ch| ch == '.' || ch == ':').next().unwrap_or(&full);
-                    if first.chars().next().map(|ch| ch.is_uppercase()).unwrap_or(false) {
+                    let first = full
+                        .split(|ch| ch == '.' || ch == ':')
+                        .next()
+                        .unwrap_or(&full);
+                    if first
+                        .chars()
+                        .next()
+                        .map(|ch| ch.is_uppercase())
+                        .unwrap_or(false)
+                    {
                         self.push_ref(node, first, None, RefKind::Value, RefContext::Jsx);
                     }
                 }
@@ -2012,7 +2026,13 @@ impl<'a> Visitor<'a> {
                 return;
             }
             if o == "this" {
-                self.push_ref(node, &p, Some("this".to_string()), RefKind::Value, RefContext::ThisMethod);
+                self.push_ref(
+                    node,
+                    &p,
+                    Some("this".to_string()),
+                    RefKind::Value,
+                    RefContext::ThisMethod,
+                );
             } else {
                 // Bare `obj.prop` (property value, condition, ...) may reference a
                 // method owned by `obj` (object literal, namespace, class). Record it;
@@ -2109,7 +2129,11 @@ impl<'a> Visitor<'a> {
             let ikind = i.kind();
             let is_literal = matches!(ikind, "string" | "number" | "string_fragment")
                 || (ikind == "template_string" && !self.text(&i).contains("${"));
-            if (otext == "globalThis" || otext == "window" || otext == "global" || otext == "self" || otext == "Reflect")
+            if (otext == "globalThis"
+                || otext == "window"
+                || otext == "global"
+                || otext == "self"
+                || otext == "Reflect")
                 && !is_literal
             {
                 self.dynamic_details.push(format!(
@@ -2136,7 +2160,8 @@ impl<'a> Visitor<'a> {
                     && base_root != "exports"
                     && base_root != "module"
                 {
-                    self.dynamic_dispatch_bases.push((base_root, self.current_symbol()));
+                    self.dynamic_dispatch_bases
+                        .push((base_root, self.current_symbol()));
                 }
             }
         }
@@ -2201,7 +2226,8 @@ impl<'a> Visitor<'a> {
         for (i, line) in src.lines().enumerate() {
             let n = i + 1;
             let t = line.trim();
-            if t.contains("Reflect.get") || t.contains("Reflect.has") || t.contains("Reflect.apply") {
+            if t.contains("Reflect.get") || t.contains("Reflect.has") || t.contains("Reflect.apply")
+            {
                 extra.push(format!("{}:{}: Reflect.* usage", rel, n));
             }
             if t.contains("globalThis[") || t.contains("window[") || t.contains("global[") {
@@ -2596,9 +2622,11 @@ fn object_literal_exports(source: &str, node: &Node) -> Vec<(String, String)> {
 fn subscript_parts(source: &str, node: &Node) -> (Option<String>, bool, Option<String>) {
     let obj = node.child_by_field_name("object");
     let idx = node.child_by_field_name("index");
-    let o = obj.and_then(|n| n.utf8_text(source.as_bytes()).ok().map(|s| {
-        s.split('.').next().unwrap_or(s).trim().to_string()
-    }));
+    let o = obj.and_then(|n| {
+        n.utf8_text(source.as_bytes())
+            .ok()
+            .map(|s| s.split('.').next().unwrap_or(s).trim().to_string())
+    });
     let (is_literal, lit_name) = match idx {
         Some(i) => match i.kind() {
             "string" | "string_fragment" => (true, string_literal_value(source, &i)),
@@ -2786,10 +2814,12 @@ fn path_join_prefix(source: &str, call_node: &Node) -> Option<String> {
 fn member_parts(source: &str, node: &Node) -> (Option<String>, Option<String>) {
     let obj = node.child_by_field_name("object");
     let prop = node.child_by_field_name("property");
-    let o = obj.and_then(|n| n.utf8_text(source.as_bytes()).ok().map(|s| {
-        // For `this`, nested member etc., take first segment
-        s.split('.').next().unwrap_or(s).trim().to_string()
-    }));
+    let o = obj.and_then(|n| {
+        n.utf8_text(source.as_bytes()).ok().map(|s| {
+            // For `this`, nested member etc., take first segment
+            s.split('.').next().unwrap_or(s).trim().to_string()
+        })
+    });
     let p = prop.and_then(|n| n.utf8_text(source.as_bytes()).ok().map(|s| s.to_string()));
     (o, p)
 }
@@ -2799,7 +2829,11 @@ fn node_debug(source: &str, node: &Node) -> String {
     format!(
         "{} [{}] {:?}",
         node.kind(),
-        node.utf8_text(source.as_bytes()).unwrap_or("").chars().take(40).collect::<String>(),
+        node.utf8_text(source.as_bytes())
+            .unwrap_or("")
+            .chars()
+            .take(40)
+            .collect::<String>(),
         node.start_position()
     )
 }
@@ -2815,7 +2849,10 @@ fn extract_star_as_name(source: &str, node: &Node) -> Option<String> {
     let after = after.trim_start();
     if after.starts_with("as") {
         let rest = after[2..].trim_start();
-        let name: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$').collect();
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+            .collect();
         if !name.is_empty() {
             return Some(name);
         }

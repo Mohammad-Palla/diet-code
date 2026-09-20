@@ -17,11 +17,11 @@ use rayon::prelude::*;
 
 use confidence::Confidence;
 use edits::CleanupPlan;
-use entrypoints::{DietConfig, EntrySets, IgnoreRules, is_default_ignored, is_test_file};
+use entrypoints::{is_default_ignored, is_test_file, DietConfig, EntrySets, IgnoreRules};
 use findings::{Finding, FindingKind, GitEvidence};
 use graph::{build_binding_maps, resolve_references, Graph};
 use imports::{ImportRec, ReExportRec, ReferenceRec};
-use parser::{ParsedFile, to_rel_slash};
+use parser::{to_rel_slash, ParsedFile};
 use reachability::{compute_reachability, Reachability};
 use resolver::Resolver;
 use symbols::{Entity, SymbolKind};
@@ -194,10 +194,15 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
         references.extend(p.references.iter().cloned());
         entities.extend(p.entities.iter().cloned());
         for (var, cls) in &p.var_types {
-            var_types.entry((p.rel_path.clone(), var.clone())).or_insert_with(|| cls.clone());
+            var_types
+                .entry((p.rel_path.clone(), var.clone()))
+                .or_insert_with(|| cls.clone());
         }
         if !p.escaped_classes.is_empty() {
-            escaped_classes.entry(p.rel_path.clone()).or_default().extend(p.escaped_classes.iter().cloned());
+            escaped_classes
+                .entry(p.rel_path.clone())
+                .or_default()
+                .extend(p.escaped_classes.iter().cloned());
         }
         if p.publishes_members {
             publishes_members.insert(p.rel_path.clone());
@@ -238,13 +243,21 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
     {
         let mut union: HashMap<(String, String, String), (bool, bool)> = HashMap::new();
         for e in &entities {
-            let key = (e.file.clone(), e.parent.clone().unwrap_or_default(), e.name.clone());
+            let key = (
+                e.file.clone(),
+                e.parent.clone().unwrap_or_default(),
+                e.name.clone(),
+            );
             let slot = union.entry(key).or_insert((false, false));
             slot.0 |= e.exported;
             slot.1 |= e.is_default_export;
         }
         for e in entities.iter_mut() {
-            let key = (e.file.clone(), e.parent.clone().unwrap_or_default(), e.name.clone());
+            let key = (
+                e.file.clone(),
+                e.parent.clone().unwrap_or_default(),
+                e.name.clone(),
+            );
             if let Some((exp, def)) = union.get(&key) {
                 e.exported |= exp;
                 e.is_default_export |= def;
@@ -291,7 +304,10 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
                 .or_default()
                 .push(e.id.clone());
         }
-        file_to_symbols.entry(e.file.clone()).or_default().push(e.id.clone());
+        file_to_symbols
+            .entry(e.file.clone())
+            .or_default()
+            .push(e.id.clone());
     }
     // Ensure every file has an entry in file_to_symbols.
     for f in &rel_files {
@@ -318,7 +334,13 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
     let reexport_map = build_reexport_map(&reexports, &entities, &file_set);
 
     // File -> exported names (direct entities + re-exports incl. wildcard expansion).
-    let file_exported_names = build_file_export_names(&entities, &reexports, &reexport_map, &local_exports_map, &rel_files);
+    let file_exported_names = build_file_export_names(
+        &entities,
+        &reexports,
+        &reexport_map,
+        &local_exports_map,
+        &rel_files,
+    );
 
     // Namespace imports: file -> local_ns -> resolved target file.
     // (`const lib = require("./lib")` binds the whole module too.)
@@ -339,7 +361,11 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
     // 7. Resolve symbol references.
     let bindings = build_binding_maps(&imports);
     // Ambient-global types from import/export-less script files.
-    let ambient_files: HashSet<String> = parsed.iter().filter(|p| p.is_ambient).map(|p| p.rel_path.clone()).collect();
+    let ambient_files: HashSet<String> = parsed
+        .iter()
+        .filter(|p| p.is_ambient)
+        .map(|p| p.rel_path.clone())
+        .collect();
     let mut global_types: HashMap<String, String> = HashMap::new();
     for e in &entities {
         if !ambient_files.contains(&e.file) || e.parent.is_some() {
@@ -351,7 +377,9 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
             | SymbolKind::Enum
             | SymbolKind::Namespace
             | SymbolKind::Class => {
-                global_types.entry(e.name.clone()).or_insert_with(|| e.id.clone());
+                global_types
+                    .entry(e.name.clone())
+                    .or_insert_with(|| e.id.clone());
             }
             _ => {}
         }
@@ -373,10 +401,13 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
             if let Some(fb) = bindings.get(file) {
                 if let Some((resolved, orig, _)) = fb.get(base_name) {
                     if let Some(t) = resolved {
-                        let cn = if orig == "default" { "default" } else { orig.as_str() };
-                        if let Some(id) = graph
-                            .symbol_by_file_name
-                            .get(&(t.clone(), cn.to_string()))
+                        let cn = if orig == "default" {
+                            "default"
+                        } else {
+                            orig.as_str()
+                        };
+                        if let Some(id) =
+                            graph.symbol_by_file_name.get(&(t.clone(), cn.to_string()))
                         {
                             if graph.kinds.get(id) == Some(&SymbolKind::Class) {
                                 target = Some(id.clone());
@@ -391,7 +422,18 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
         }
     }
 
-    resolve_references(&mut graph, &references, &bindings, &reexport_map, &namespace_imports, &file_exported_names, &var_types, &global_types, &heritage_links, &mut dangling_calls);
+    resolve_references(
+        &mut graph,
+        &references,
+        &bindings,
+        &reexport_map,
+        &namespace_imports,
+        &file_exported_names,
+        &var_types,
+        &global_types,
+        &heritage_links,
+        &mut dangling_calls,
+    );
 
     // Files executed via package.json scripts anywhere in the repo.
     let script_refs = entrypoints::script_referenced_files(&root, &file_set);
@@ -425,7 +467,11 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
                     .map(|ids| {
                         ids.iter().find(|id| {
                             graph.kinds.get(*id) == Some(&SymbolKind::Class)
-                                && graph.parent_of.get(*id).map(|p| p.is_empty()).unwrap_or(false)
+                                && graph
+                                    .parent_of
+                                    .get(*id)
+                                    .map(|p| p.is_empty())
+                                    .unwrap_or(false)
                         })
                     })
                     .flatten()
@@ -439,7 +485,12 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
     // Files whose ambient globals are used elsewhere are load-bearing.
     let mut files_with_used_globals: HashSet<String> = HashSet::new();
     for id in global_types.values() {
-        if graph.symbol_callers.get(id).map(|c| !c.is_empty()).unwrap_or(false) {
+        if graph
+            .symbol_callers
+            .get(id)
+            .map(|c| !c.is_empty())
+            .unwrap_or(false)
+        {
             if let Some(file) = id.split("::").next() {
                 files_with_used_globals.insert(file.to_string());
             }
@@ -601,7 +652,10 @@ fn build_reexport_map(
     let mut direct: HashMap<String, HashSet<String>> = HashMap::new();
     for e in entities {
         if e.exported {
-            direct.entry(e.file.clone()).or_default().insert(e.name.clone());
+            direct
+                .entry(e.file.clone())
+                .or_default()
+                .insert(e.name.clone());
         }
     }
     // Wildcards to expand after fixed-point of named? Wildcard expansion needs target's full export list
@@ -685,13 +739,17 @@ fn build_file_export_names(
     // `export const { a } = ...`) still make the file a surface.
     for (file, les) in local_exports {
         for le in les {
-            m.entry(file.clone()).or_default().insert(le.exported_name.clone());
+            m.entry(file.clone())
+                .or_default()
+                .insert(le.exported_name.clone());
         }
     }
     for re in reexports {
         if re.is_wildcard {
             if re.exported_name != "*" {
-                m.entry(re.from_file.clone()).or_default().insert(re.exported_name.clone());
+                m.entry(re.from_file.clone())
+                    .or_default()
+                    .insert(re.exported_name.clone());
             } else {
                 // expand members known via map
                 for ((f, n), _) in reexport_map.iter() {
@@ -701,7 +759,9 @@ fn build_file_export_names(
                 }
             }
         } else {
-            m.entry(re.from_file.clone()).or_default().insert(re.exported_name.clone());
+            m.entry(re.from_file.clone())
+                .or_default()
+                .insert(re.exported_name.clone());
         }
     }
     m
@@ -844,8 +904,16 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         // Executed via package.json scripts: tooling entry point, not dead.
         if result.script_refs.contains(file) {
             findings.push(mk_finding(
-                file, None, FindingKind::DeadFile, 1, 1, 0, 0,
-                Confidence::Low, false, test_reach,
+                file,
+                None,
+                FindingKind::DeadFile,
+                1,
+                1,
+                0,
+                0,
+                Confidence::Low,
+                false,
+                test_reach,
                 vec!["referenced by package.json scripts; executed by tooling".to_string()],
             ));
             continue;
@@ -853,8 +921,16 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         // Referenced by CI workflows: executed by automation, not dead.
         if result.workflow_refs.contains(file) {
             findings.push(mk_finding(
-                file, None, FindingKind::DeadFile, 1, 1, 0, 0,
-                Confidence::Low, false, test_reach,
+                file,
+                None,
+                FindingKind::DeadFile,
+                1,
+                1,
+                0,
+                0,
+                Confidence::Low,
+                false,
+                test_reach,
                 vec!["referenced by CI workflow files; executed by automation".to_string()],
             ));
             continue;
@@ -862,14 +938,29 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         // Executable scripts are run manually (CLI), never imported.
         if result.executable_scripts.contains(file) {
             findings.push(mk_finding(
-                file, None, FindingKind::DeadFile, 1, 1, 0, 0,
-                Confidence::Low, false, test_reach,
-                vec!["executable script (process.argv/shebang); run manually, not imported".to_string()],
+                file,
+                None,
+                FindingKind::DeadFile,
+                1,
+                1,
+                0,
+                0,
+                Confidence::Low,
+                false,
+                test_reach,
+                vec![
+                    "executable script (process.argv/shebang); run manually, not imported"
+                        .to_string(),
+                ],
             ));
             continue;
         }
         // Script-like files (no exports + top-level calls) may be run directly.
-        let file_has_exports = result.file_exported_names.get(file).map(|s| !s.is_empty()).unwrap_or(false);
+        let file_has_exports = result
+            .file_exported_names
+            .get(file)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
         if !file_has_exports && result.script_like_files.contains(file) {
             findings.push(mk_finding(
                 file, None, FindingKind::DeadFile, 1, 1, 0, 0,
@@ -881,22 +972,48 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         // Agent-tooling directories are loaded by the agent runtime by convention.
         if entrypoints::is_agent_tooling_dir(file) {
             findings.push(mk_finding(
-                file, None, FindingKind::DeadFile, 1, 1, 0, 0,
-                Confidence::Medium, false, test_reach,
-                vec!["inside an agent-tooling directory; loaded by convention, not imports".to_string()],
+                file,
+                None,
+                FindingKind::DeadFile,
+                1,
+                1,
+                0,
+                0,
+                Confidence::Medium,
+                false,
+                test_reach,
+                vec![
+                    "inside an agent-tooling directory; loaded by convention, not imports"
+                        .to_string(),
+                ],
             ));
             continue;
         }
-        let dynamic_here = result.file_dynamic.get(file).map(|v| !v.is_empty()).unwrap_or(false);
+        let dynamic_here = result
+            .file_dynamic
+            .get(file)
+            .map(|v| !v.is_empty())
+            .unwrap_or(false);
         let protected = is_protected_by_dynamic_prefix(&result.dynamic_protected_prefixes, file);
         let config_refs = entrypoints::config_references(&result.root, file);
         // Test-runner magic dirs (Jest `__mocks__/`) are loaded by the runner,
         // never by imports: review only.
         if entrypoints::is_test_framework_magic(file) {
             findings.push(mk_finding(
-                file, None, FindingKind::DeadFile, 1, 1, 0, 0,
-                Confidence::Medium, false, test_reach,
-                vec!["loaded by test-runner convention (__mocks__/); not referenced by imports".to_string()],
+                file,
+                None,
+                FindingKind::DeadFile,
+                1,
+                1,
+                0,
+                0,
+                Confidence::Medium,
+                false,
+                test_reach,
+                vec![
+                    "loaded by test-runner convention (__mocks__/); not referenced by imports"
+                        .to_string(),
+                ],
             ));
             continue;
         }
@@ -904,15 +1021,30 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         // never by imports: report for review, never auto-remove.
         if entrypoints::is_tooling_config(file) {
             findings.push(mk_finding(
-                file, None, FindingKind::DeadFile, 1, 1, 0, 0,
-                Confidence::Medium, false, test_reach,
-                vec!["tooling configuration file; loaded by external tooling rather than imports".to_string()],
+                file,
+                None,
+                FindingKind::DeadFile,
+                1,
+                1,
+                0,
+                0,
+                Confidence::Medium,
+                false,
+                test_reach,
+                vec![
+                    "tooling configuration file; loaded by external tooling rather than imports"
+                        .to_string(),
+                ],
             ));
             continue;
         }
         // Library without an `exports` map: consumers may deep-import any file
         // that exports symbols, so such files can never be proven dead by imports.
-        let has_exports = result.file_exported_names.get(file).map(|s| !s.is_empty()).unwrap_or(false);
+        let has_exports = result
+            .file_exported_names
+            .get(file)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
         if has_exports && result.package_kind == entrypoints::PackageKind::LibraryUnknownSurface {
             findings.push(mk_finding(
                 file, None, FindingKind::DeadFile, 1, 1, 0, 0,
@@ -923,25 +1055,52 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         }
         if !config_refs.is_empty() {
             findings.push(mk_finding(
-                file, None, FindingKind::DeadFile, 1, 1, 0, 0,
-                Confidence::Low, false, test_reach,
-                vec![format!("referenced by configuration ({})", config_refs.join(", "))],
+                file,
+                None,
+                FindingKind::DeadFile,
+                1,
+                1,
+                0,
+                0,
+                Confidence::Low,
+                false,
+                test_reach,
+                vec![format!(
+                    "referenced by configuration ({})",
+                    config_refs.join(", ")
+                )],
             ));
             continue;
         }
         // Package public surface check (in case entries missed).
         if result.entries.package_export_files.contains(file) {
             findings.push(mk_finding(
-                file, None, FindingKind::DeadFile, 1, 1, 0, 0,
-                Confidence::Low, false, test_reach,
+                file,
+                None,
+                FindingKind::DeadFile,
+                1,
+                1,
+                0,
+                0,
+                Confidence::Low,
+                false,
+                test_reach,
                 vec!["part of package public export surface".to_string()],
             ));
             continue;
         }
         if dynamic_here || protected {
             findings.push(mk_finding(
-                file, None, FindingKind::DeadFile, 1, 1, 0, 0,
-                Confidence::Low, false, test_reach,
+                file,
+                None,
+                FindingKind::DeadFile,
+                1,
+                1,
+                0,
+                0,
+                Confidence::Low,
+                false,
+                test_reach,
                 vec!["unresolved dynamic usage nearby; static reachability unreliable".to_string()],
             ));
             continue;
@@ -956,7 +1115,10 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
             "no supported dynamic reference".to_string(),
         ];
         if test_reach || test_importers > 0 {
-            reasons.push(format!("referenced by {} test file(s) only", test_importers));
+            reasons.push(format!(
+                "referenced by {} test file(s) only",
+                test_importers
+            ));
         }
         let confidence = if total_importers == 0 && !test_reach {
             Confidence::Certain
@@ -966,8 +1128,17 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         // Line range: whole file. Use 1..line_count.
         let line_count = count_lines_for_file(result, file);
         findings.push(mk_finding(
-            file, None, FindingKind::DeadFile, 1, line_count, 0, 0,
-            confidence, false, test_reach, reasons,
+            file,
+            None,
+            FindingKind::DeadFile,
+            1,
+            line_count,
+            0,
+            0,
+            confidence,
+            false,
+            test_reach,
+            reasons,
         ));
         if confidence.auto_removable() {
             dead_files.insert(file.clone());
@@ -984,7 +1155,10 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
     let mut children_of: HashMap<&str, Vec<&str>> = HashMap::new();
     for e in &result.entities {
         if let Some(p) = &e.parent {
-            children_of.entry(p.as_str()).or_default().push(e.id.as_str());
+            children_of
+                .entry(p.as_str())
+                .or_default()
+                .push(e.id.as_str());
         }
     }
     let effective_callers = |id: &str| -> HashSet<String> {
@@ -1101,7 +1275,10 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
             continue;
         }
         // Never report constructors.
-        if e.kind == SymbolKind::Method && (e.name == "constructor" || e.name.starts_with('#')) && e.name != "#private-unused" {
+        if e.kind == SymbolKind::Method
+            && (e.name == "constructor" || e.name.starts_with('#'))
+            && e.name != "#private-unused"
+        {
             if e.name == "constructor" {
                 continue;
             }
@@ -1137,7 +1314,11 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
             continue;
         }
 
-        let file_has_dynamic = result.file_dynamic.get(&e.file).map(|v| !v.is_empty()).unwrap_or(false);
+        let file_has_dynamic = result
+            .file_dynamic
+            .get(&e.file)
+            .map(|v| !v.is_empty())
+            .unwrap_or(false);
         let protected = is_protected_by_dynamic_prefix(&result.dynamic_protected_prefixes, &e.file);
         let is_entry_file = result.entries.production.contains(&e.file);
         let is_public_file = result.entries.package_export_files.contains(&e.file)
@@ -1156,9 +1337,10 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
             SymbolKind::Class => FindingKind::DeadClass,
             SymbolKind::Method => FindingKind::DeadMethod,
             SymbolKind::Variable => FindingKind::DeadVariable,
-            SymbolKind::Enum | SymbolKind::Interface | SymbolKind::TypeAlias | SymbolKind::Namespace => {
-                FindingKind::DeadType
-            }
+            SymbolKind::Enum
+            | SymbolKind::Interface
+            | SymbolKind::TypeAlias
+            | SymbolKind::Namespace => FindingKind::DeadType,
         };
 
         // Confidence gate.
@@ -1198,32 +1380,61 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
             }
         } else if e.kind == SymbolKind::Method || is_class_field_fn(e, &entity_by_id) {
             // Check parent class export status: public class => method is public API.
-            let parent_exported = e.parent.as_ref().and_then(|p| entity_parent_exported(p, &entity_by_id)).unwrap_or(false);
+            let parent_exported = e
+                .parent
+                .as_ref()
+                .and_then(|p| entity_parent_exported(p, &entity_by_id))
+                .unwrap_or(false);
             // Instances may escape via `return new X()` / exported initializers...
             let parent_class = e.parent.as_deref().and_then(parent_class_name);
-            let escaped = parent_class.as_deref().map(|cls| {
-                result.escaped_classes.get(&e.file).map(|s| s.contains(cls)).unwrap_or(false)
-            }).unwrap_or(false);
+            let escaped = parent_class
+                .as_deref()
+                .map(|cls| {
+                    result
+                        .escaped_classes
+                        .get(&e.file)
+                        .map(|s| s.contains(cls))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
             // ...or the file publishes properties outward (plugin/prototype pattern).
             let publishes = result.publishes_members.contains(&e.file);
             // Methods passed as callbacks/hooks in call arguments...
-            let is_hook = result.hook_methods.contains(&(e.file.clone(), e.name.clone(), e.start_line));
+            let is_hook =
+                result
+                    .hook_methods
+                    .contains(&(e.file.clone(), e.name.clone(), e.start_line));
             // ...or invoked via computed dispatch (`handlers[key](...)`).
-            let dispatched = e.parent.as_ref().map(|p| result.dispatch_owners.contains(p)).unwrap_or(false);
+            let dispatched = e
+                .parent
+                .as_ref()
+                .map(|p| result.dispatch_owners.contains(p))
+                .unwrap_or(false);
             // ...or part of an exported module surface object (`module.exports = { create() {} }`).
-            let surfaced = result.surface_methods.contains(&(e.file.clone(), e.name.clone(), e.start_line));
+            let surfaced =
+                result
+                    .surface_methods
+                    .contains(&(e.file.clone(), e.name.clone(), e.start_line));
             // ...or invoked through an unresolvable channel with a matching name
             // (`cursor.moveNext()` in this file or in files importing it:
             // polymorphism, dynamic keys, runtime protocols).
-            let dangling_hit = result.dangling_calls.contains(&(e.file.clone(), e.name.clone()))
+            let dangling_hit = result
+                .dangling_calls
+                .contains(&(e.file.clone(), e.name.clone()))
                 || graph.importers_of(&e.file).iter().any(|im| {
-                    result.dangling_calls.contains(&(im.clone(), e.name.clone()))
+                    result
+                        .dangling_calls
+                        .contains(&(im.clone(), e.name.clone()))
                 });
             // ...or owned by an object spread into other objects (`{...handlers}`:
             // methods may be invoked through the copies).
-            let spread_hit = e.parent.as_deref().and_then(|p| {
-                parent_var_name(p).map(|v| result.spread_vars.contains(&(e.file.clone(), v)))
-            }).unwrap_or(false);
+            let spread_hit = e
+                .parent
+                .as_deref()
+                .and_then(|p| {
+                    parent_var_name(p).map(|v| result.spread_vars.contains(&(e.file.clone(), v)))
+                })
+                .unwrap_or(false);
             if is_hook {
                 confidence = Confidence::Medium;
                 reasons.push("method in an object literal passed as a call argument; may be invoked as a callback/hook".to_string());
@@ -1232,10 +1443,16 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
                 reasons.push("method of an exported module surface object; may be called by consumers or frameworks".to_string());
             } else if dispatched {
                 confidence = Confidence::Medium;
-                reasons.push("owner object invoked via computed dispatch (obj[key]()); any method may run".to_string());
+                reasons.push(
+                    "owner object invoked via computed dispatch (obj[key]()); any method may run"
+                        .to_string(),
+                );
             } else if dangling_hit {
                 confidence = Confidence::Medium;
-                reasons.push("unresolved call sites with this method name exist; may dispatch here".to_string());
+                reasons.push(
+                    "unresolved call sites with this method name exist; may dispatch here"
+                        .to_string(),
+                );
             } else if spread_hit {
                 confidence = Confidence::Medium;
                 reasons.push("owner object is spread into other objects; methods may be invoked through copies".to_string());
@@ -1302,14 +1519,14 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         if f.kind != FindingKind::DeadFile || !f.confidence.auto_removable() {
             continue;
         }
-        let kept_importer = graph.importers_of(&f.file).iter().any(|im| {
-            !removable_files.contains(im) && !is_test_file(im)
-        });
+        let kept_importer = graph
+            .importers_of(&f.file)
+            .iter()
+            .any(|im| !removable_files.contains(im) && !is_test_file(im));
         if kept_importer {
             f.confidence = Confidence::Medium;
-            f.reasons.push(
-                "imported by files that are kept; removing it would break them".to_string(),
-            );
+            f.reasons
+                .push("imported by files that are kept; removing it would break them".to_string());
         }
     }
 
@@ -1323,7 +1540,10 @@ fn entity_parent_exported(parent_id: &str, by_id: &HashMap<&str, &Entity>) -> Op
 /// Arrow/function-expression class fields (`onError = (h) => {...}`) behave
 /// like methods for confidence purposes (public if the class is public).
 fn is_class_field_fn(e: &Entity, by_id: &HashMap<&str, &Entity>) -> bool {
-    if !matches!(e.kind, SymbolKind::FunctionExpression | SymbolKind::ArrowFunction) {
+    if !matches!(
+        e.kind,
+        SymbolKind::FunctionExpression | SymbolKind::ArrowFunction
+    ) {
         return false;
     }
     match e.parent.as_deref().and_then(|p| by_id.get(p)) {
@@ -1343,7 +1563,8 @@ fn parent_var_name(parent_id: &str) -> Option<String> {
 }
 
 /// Class name owning a method, from a parent id like `file::class:Local`.
-fn parent_class_name(parent_id: &str) -> Option<String> {    for seg in parent_id.split("::") {
+fn parent_class_name(parent_id: &str) -> Option<String> {
+    for seg in parent_id.split("::") {
         if let Some(name) = seg.strip_prefix("class:") {
             return Some(name.to_string());
         }
@@ -1449,7 +1670,14 @@ fn git_evidence_for(root: &Path, rel: &str) -> GitEvidence {
     };
     // `git log --follow --format=%H|%ad|%an --date=short -- <file>`
     let out = std::process::Command::new("git")
-        .args(["log", "--follow", "--format=%H|%ad|%an", "--date=short", "--", rel])
+        .args([
+            "log",
+            "--follow",
+            "--format=%H|%ad|%an",
+            "--date=short",
+            "--",
+            rel,
+        ])
         .current_dir(root)
         .output();
     let Ok(out) = out else {
@@ -1503,5 +1731,8 @@ fn build_cleanup_plan(result: &AnalysisResult) -> CleanupPlan {
     remove_symbols.retain(|s| !del.contains(s.file.as_str()));
     // Sort descending by byte so application order is safe.
     remove_symbols.sort_by(|a, b| a.file.cmp(&b.file).then(b.start_byte.cmp(&a.start_byte)));
-    CleanupPlan { delete_files, remove_symbols }
+    CleanupPlan {
+        delete_files,
+        remove_symbols,
+    }
 }

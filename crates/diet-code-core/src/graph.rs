@@ -57,7 +57,10 @@ impl Graph {
         self.symbol_edges
             .entry(from.to_string())
             .or_default()
-            .push(SymbolEdge { to: to.to_string(), kind });
+            .push(SymbolEdge {
+                to: to.to_string(),
+                kind,
+            });
         self.symbol_callers
             .entry(to.to_string())
             .or_default()
@@ -69,7 +72,10 @@ impl Graph {
     }
 
     pub fn callers_of(&self, symbol_id: &str) -> Vec<String> {
-        self.symbol_callers.get(symbol_id).cloned().unwrap_or_default()
+        self.symbol_callers
+            .get(symbol_id)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -85,21 +91,24 @@ pub fn build_binding_maps(
             continue;
         }
         // Skip pseudo bindings that don't introduce a usable name.
-        if imp.local_name == "*require*" || imp.local_name == "*dynamic*" || imp.local_name == "*side-effect*" {
+        if imp.local_name == "*require*"
+            || imp.local_name == "*dynamic*"
+            || imp.local_name == "*side-effect*"
+        {
             continue;
         }
         // `const Cursor = require("./cursor")` binds the whole module under the
         // local name: resolve the local name in the target (like a default import).
-        let original = if imp.kind == crate::imports::ImportKind::Require
-            && imp.original_name == "*"
-        {
-            imp.local_name.clone()
-        } else {
-            imp.original_name.clone()
-        };
-        m.entry(imp.from_file.clone())
-            .or_default()
-            .insert(imp.local_name.clone(), (imp.resolved_file.clone(), original, imp.is_type_only));
+        let original =
+            if imp.kind == crate::imports::ImportKind::Require && imp.original_name == "*" {
+                imp.local_name.clone()
+            } else {
+                imp.original_name.clone()
+            };
+        m.entry(imp.from_file.clone()).or_default().insert(
+            imp.local_name.clone(),
+            (imp.resolved_file.clone(), original, imp.is_type_only),
+        );
     }
     m
 }
@@ -157,17 +166,24 @@ pub fn resolve_references(
                 // `const schemas` wins over `import * as schemas` in that scope.
                 // (Top-level conflicts would be a redeclaration SyntaxError, so
                 // file-top scope is checked AFTER bindings, in step 3.)
-                if let Some(id) = lookup_scoped_nested(graph, &r.from_file, &r.from_symbol, &r.name) {
-                    let from = r.from_symbol.clone().unwrap_or_else(|| file_pseudo(&r.from_file));
+                if let Some(id) = lookup_scoped_nested(graph, &r.from_file, &r.from_symbol, &r.name)
+                {
+                    let from = r
+                        .from_symbol
+                        .clone()
+                        .unwrap_or_else(|| file_pseudo(&r.from_file));
                     graph.add_symbol_edge(&from, &id, edge_kind);
                     continue;
                 }
                 // 1c. Check import bindings for this file.
                 if let Some(file_bindings) = bindings.get(&r.from_file) {
-                    if let Some((resolved_file_opt, original, _is_type)) = file_bindings.get(&r.name) {
+                    if let Some((resolved_file_opt, original, _is_type)) =
+                        file_bindings.get(&r.name)
+                    {
                         if let Some(resolved_file) = resolved_file_opt {
                             // Follow re-export chains: (resolved_file, original) -> final targets.
-                            let targets = follow_reexport(resolved_file, original, reexport_targets);
+                            let targets =
+                                follow_reexport(resolved_file, original, reexport_targets);
                             let targets = if targets.is_empty() {
                                 vec![(resolved_file.clone(), original.clone())]
                             } else {
@@ -184,7 +200,10 @@ pub fn resolve_references(
                                     orig.clone()
                                 };
                                 if let Some(id) = lookup_symbol(graph, &tf, &target_name) {
-                                    let from = r.from_symbol.clone().unwrap_or_else(|| file_pseudo(&r.from_file));
+                                    let from = r
+                                        .from_symbol
+                                        .clone()
+                                        .unwrap_or_else(|| file_pseudo(&r.from_file));
                                     graph.add_symbol_edge(&from, &id, edge_kind);
                                 }
                             }
@@ -209,7 +228,10 @@ pub fn resolve_references(
                                 let mut done = false;
                                 for (tf, orig) in targets {
                                     if let Some(id) = lookup_symbol(graph, &tf, &orig) {
-                                        let from = r.from_symbol.clone().unwrap_or_else(|| file_pseudo(&r.from_file));
+                                        let from = r
+                                            .from_symbol
+                                            .clone()
+                                            .unwrap_or_else(|| file_pseudo(&r.from_file));
                                         graph.add_symbol_edge(&from, &id, edge_kind);
                                         done = true;
                                     }
@@ -224,7 +246,10 @@ pub fn resolve_references(
                 // 3. Same-file symbol via lexical scope (nearest enclosing declaration wins,
                 //    so shadowed names resolve correctly).
                 if let Some(id) = lookup_scoped(graph, &r.from_file, &r.from_symbol, &r.name) {
-                    let from = r.from_symbol.clone().unwrap_or_else(|| file_pseudo(&r.from_file));
+                    let from = r
+                        .from_symbol
+                        .clone()
+                        .unwrap_or_else(|| file_pseudo(&r.from_file));
                     if from != id {
                         graph.add_symbol_edge(&from, &id, edge_kind);
                     } else {
@@ -239,7 +264,10 @@ pub fn resolve_references(
                 //    across files. Only for TYPE references, never values.
                 if r.kind == RefKind::Type {
                     if let Some(id) = global_types.get(&r.name) {
-                        let from = r.from_symbol.clone().unwrap_or_else(|| file_pseudo(&r.from_file));
+                        let from = r
+                            .from_symbol
+                            .clone()
+                            .unwrap_or_else(|| file_pseudo(&r.from_file));
                         if from != *id {
                             graph.add_symbol_edge(&from, id, RefKind::Type);
                         }
@@ -260,7 +288,8 @@ pub fn resolve_references(
                         if let Some(from_sym) = &r.from_symbol {
                             if let Some((file, owner)) = this_scope(graph, from_sym) {
                                 if file == r.from_file {
-                                    if let Some(id) = child_in_scope(graph, &file, &owner, &r.name) {
+                                    if let Some(id) = child_in_scope(graph, &file, &owner, &r.name)
+                                    {
                                         graph.add_symbol_edge(from_sym, &id, RefKind::Value);
                                         linked = true;
                                     }
@@ -272,7 +301,8 @@ pub fn resolve_references(
                         if let Some(from_sym) = &r.from_symbol {
                             if let Some((file, owner)) = super_scope(graph, heritage, from_sym) {
                                 if file == r.from_file {
-                                    if let Some(id) = child_in_scope(graph, &file, &owner, &r.name) {
+                                    if let Some(id) = child_in_scope(graph, &file, &owner, &r.name)
+                                    {
                                         graph.add_symbol_edge(from_sym, &id, RefKind::Value);
                                         linked = true;
                                     }
@@ -290,7 +320,10 @@ pub fn resolve_references(
                                 };
                                 for (tf, orig) in targets {
                                     if let Some(id) = lookup_symbol(graph, &tf, &orig) {
-                                        let from = r.from_symbol.clone().unwrap_or_else(|| file_pseudo(&r.from_file));
+                                        let from = r
+                                            .from_symbol
+                                            .clone()
+                                            .unwrap_or_else(|| file_pseudo(&r.from_file));
                                         graph.add_symbol_edge(&from, &id, RefKind::Value);
                                         linked = true;
                                     }
@@ -313,7 +346,10 @@ pub fn resolve_references(
                             base,
                             &r.name,
                         ) {
-                            let from = r.from_symbol.clone().unwrap_or_else(|| file_pseudo(&r.from_file));
+                            let from = r
+                                .from_symbol
+                                .clone()
+                                .unwrap_or_else(|| file_pseudo(&r.from_file));
                             graph.add_symbol_edge(&from, &id, RefKind::Value);
                             linked = true;
                         }
@@ -541,11 +577,20 @@ fn resolve_method_receiver(
         }
     }
     // Imported class name used statically: `import { Service } from ...; Service.create()`.
-    if base.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+    if base
+        .chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false)
+    {
         if let Some(fb) = bindings.get(file) {
             if let Some((target_opt, orig, _)) = fb.get(base) {
                 if let Some(target) = target_opt {
-                    let class_name = if orig == "default" { "default" } else { orig.as_str() };
+                    let class_name = if orig == "default" {
+                        "default"
+                    } else {
+                        orig.as_str()
+                    };
                     if let Some(class_id) = graph
                         .symbol_by_file_name
                         .get(&(target.clone(), class_name.to_string()))
@@ -646,12 +691,18 @@ fn lookup_symbol(graph: &Graph, file: &str, name: &str) -> Option<String> {
         // Any symbol in file marked default? We stored name "default" for anonymous defaults.
         // Also named symbols with is_default_export aren't distinguishable by id; try name "default" first,
         // then fall back to nothing (conservative: link to file pseudo so file stays reachable).
-        if let Some(id) = graph.symbol_by_file_name.get(&(file.to_string(), "default".to_string())) {
+        if let Some(id) = graph
+            .symbol_by_file_name
+            .get(&(file.to_string(), "default".to_string()))
+        {
             return Some(id.clone());
         }
         return None;
     }
-    graph.symbol_by_file_name.get(&(file.to_string(), name.to_string())).cloned()
+    graph
+        .symbol_by_file_name
+        .get(&(file.to_string(), name.to_string()))
+        .cloned()
 }
 
 fn follow_reexport(

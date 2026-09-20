@@ -39,7 +39,10 @@ pub fn is_test_file(rel: &str) -> bool {
     // Conventional test directories: everything under them is test scope,
     // at any depth (`test/`, `src/v3/tests/`, ...).
     if rel.split('/').any(|comp| {
-        matches!(comp, "test" | "tests" | "spec" | "specs" | "e2e" | "__tests__" | "__test__")
+        matches!(
+            comp,
+            "test" | "tests" | "spec" | "specs" | "e2e" | "__tests__" | "__test__"
+        )
     }) {
         return true;
     }
@@ -95,7 +98,11 @@ pub fn workflow_referenced_files(root: &Path, files: &HashSet<String>) -> HashSe
             // (github-script `require` is workspace-relative in practice).
             let mut cands = vec![tok.clone()];
             if let Ok(rel_dir) = yml_dir.strip_prefix(root) {
-                cands.push(format!("{}/{}", rel_dir.to_string_lossy().replace('\\', "/"), tok));
+                cands.push(format!(
+                    "{}/{}",
+                    rel_dir.to_string_lossy().replace('\\', "/"),
+                    tok
+                ));
             }
             for cand in cands {
                 let cand = cand.strip_prefix("./").unwrap_or(&cand);
@@ -133,8 +140,13 @@ fn workflow_file_tokens(text: &str) -> Vec<String> {
         i += 1;
     }
     // Bare shell tokens (`run: node tools/x.js`).
-    for part in text.split(|c: char| c.is_whitespace() || matches!(c, '&' | '|' | ';' | '(' | ')' | ':')) {
-        let t = part.trim().trim_matches(|c| c == '"' || c == '\'' || c == '`').trim();
+    for part in
+        text.split(|c: char| c.is_whitespace() || matches!(c, '&' | '|' | ';' | '(' | ')' | ':'))
+    {
+        let t = part
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+            .trim();
         if has_source_ext(t) && !t.contains('*') && !t.starts_with('-') {
             out.push(t.trim_start_matches("./").to_string());
         }
@@ -227,7 +239,9 @@ fn find_package_jsons(root: &Path) -> Vec<std::path::PathBuf> {
 
 fn tokenize_script(raw: &str) -> Vec<String> {
     let mut out = Vec::new();
-    for part in raw.split(|c: char| c.is_whitespace() || c == '&' || c == '|' || c == ';' || c == '(' || c == ')') {
+    for part in raw.split(|c: char| {
+        c.is_whitespace() || c == '&' || c == '|' || c == ';' || c == '(' || c == ')'
+    }) {
         let t = part.trim().trim_matches(|c| c == '"' || c == '\'').trim();
         if t.is_empty() || t.starts_with('-') || t.contains('=') && !t.contains('/') {
             continue;
@@ -261,11 +275,7 @@ fn join_and_normalize(dir: &Path, tok: &str) -> std::path::PathBuf {
     out
 }
 
-pub fn discover_entrypoints(
-    root: &Path,
-    all_files: &[String],
-    config: &DietConfig,
-) -> EntrySets {
+pub fn discover_entrypoints(root: &Path, all_files: &[String], config: &DietConfig) -> EntrySets {
     let set: HashSet<String> = all_files.iter().cloned().collect();
     let mut out = EntrySets::default();
 
@@ -421,7 +431,11 @@ fn collect_package_entries(
             }
         }
     }
-    if let Some(s) = v.get("types").and_then(|x| x.as_str()).or(v.get("typings").and_then(|x| x.as_str())) {
+    if let Some(s) = v
+        .get("types")
+        .and_then(|x| x.as_str())
+        .or(v.get("typings").and_then(|x| x.as_str()))
+    {
         if let Some(f) = match_to_file_in(root, pkg_dir, files, s) {
             public.push(f);
         }
@@ -431,7 +445,13 @@ fn collect_package_entries(
         collect_exports_targets(exports, &mut targets);
         for t in targets {
             // strip conditions like `require`/`import` handled by recursion; skip non-path conditions.
-            if t.starts_with('.') || t.contains('/') || t.ends_with(".js") || t.ends_with(".ts") || t.ends_with(".mjs") || t.ends_with(".cjs") {
+            if t.starts_with('.')
+                || t.contains('/')
+                || t.ends_with(".js")
+                || t.ends_with(".ts")
+                || t.ends_with(".mjs")
+                || t.ends_with(".cjs")
+            {
                 if let Some(f) = match_to_file_in(root, pkg_dir, files, &t) {
                     public.push(f);
                 }
@@ -452,7 +472,10 @@ fn collect_exports_targets(v: &serde_json::Value, out: &mut Vec<String>) {
             for (k, val) in map {
                 if k.starts_with('.') {
                     collect_exports_targets(val, out);
-                } else if matches!(k.as_str(), "import" | "require" | "default" | "types" | "node" | "browser") {
+                } else if matches!(
+                    k.as_str(),
+                    "import" | "require" | "default" | "types" | "node" | "browser"
+                ) {
                     collect_exports_targets(val, out);
                 } else {
                     // subpath keys like "./foo" handled above; unknown condition keys: still recurse.
@@ -686,7 +709,11 @@ impl IgnoreRules {
                 }
             }
         }
-        Self { include, exclude, dietignore }
+        Self {
+            include,
+            exclude,
+            dietignore,
+        }
     }
 
     pub fn is_excluded(&self, rel: &str) -> bool {
@@ -724,8 +751,20 @@ fn glob_for(pattern: &str) -> Option<globset::GlobMatcher> {
 }
 
 pub const DEFAULT_IGNORED_DIRS: &[&str] = &[
-    ".git", "node_modules", "dist", "build", "coverage", ".next", ".nuxt", ".turbo", ".cache",
-    "vendor", "target", ".diet-code", ".agent-diet", "out",
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".cache",
+    "vendor",
+    "target",
+    ".diet-code",
+    ".agent-diet",
+    "out",
 ];
 
 pub fn is_default_ignored(rel: &str) -> bool {

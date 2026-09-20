@@ -5,7 +5,11 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "diet-code", version, about = "Put your AI coding agent on a diet.")]
+#[command(
+    name = "diet-code",
+    version,
+    about = "Put your AI coding agent on a diet."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

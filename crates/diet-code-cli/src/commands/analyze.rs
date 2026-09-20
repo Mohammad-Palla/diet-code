@@ -37,7 +37,8 @@ pub fn run(args: AnalyzeArgs) -> Result<()> {
         let dir = root.join(".diet-code");
         std::fs::create_dir_all(&dir).ok();
         let payload = serde_json::to_string_pretty(&result.to_json_value())?;
-        std::fs::write(dir.join("analysis.json"), payload).context("writing .diet-code/analysis.json")?;
+        std::fs::write(dir.join("analysis.json"), payload)
+            .context("writing .diet-code/analysis.json")?;
     }
 
     Ok(())
@@ -84,7 +85,9 @@ fn print_human(result: &diet_code_core::AnalysisResult, verbose: bool) {
     let list: Vec<_> = result
         .findings
         .iter()
-        .filter(|f| verbose || f.confidence == Confidence::Certain || f.confidence == Confidence::High)
+        .filter(|f| {
+            verbose || f.confidence == Confidence::Certain || f.confidence == Confidence::High
+        })
         .take(if verbose { usize::MAX } else { 20 })
         .collect();
     if !list.is_empty() {
@@ -110,7 +113,10 @@ fn print_human(result: &diet_code_core::AnalysisResult, verbose: bool) {
             }
         }
         if !verbose && result.findings.len() > 20 {
-            println!("\n... and {} more (use --verbose or --json)", result.findings.len() - 20);
+            println!(
+                "\n... and {} more (use --verbose or --json)",
+                result.findings.len() - 20
+            );
         }
     } else {
         println!("\nNo CERTAIN/HIGH dead-code candidates found.");

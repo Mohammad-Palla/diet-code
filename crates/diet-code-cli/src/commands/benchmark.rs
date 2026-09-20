@@ -137,7 +137,11 @@ impl AgentRunParser for ClaudeParser {
                     }
                 }
                 // tool_use counting
-                if let Some(content) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
+                if let Some(content) = v
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array())
+                {
                     for item in content {
                         if item.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
                             tel.tool_calls = Some(tel.tool_calls.unwrap_or(0) + 1);
@@ -199,12 +203,20 @@ impl AgentRunParser for OpencodeParser {
                         // reward warm caches instead of smaller repos.)
                         let input = tok.get("input").and_then(|x| x.as_u64()).unwrap_or(0);
                         let cache = tok.get("cache");
-                        let read = cache.and_then(|c| c.get("read")).and_then(|x| x.as_u64()).unwrap_or(0);
-                        let write = cache.and_then(|c| c.get("write")).and_then(|x| x.as_u64()).unwrap_or(0);
-                        tel.input_tokens = Some(tel.input_tokens.unwrap_or(0) + input + read + write);
+                        let read = cache
+                            .and_then(|c| c.get("read"))
+                            .and_then(|x| x.as_u64())
+                            .unwrap_or(0);
+                        let write = cache
+                            .and_then(|c| c.get("write"))
+                            .and_then(|x| x.as_u64())
+                            .unwrap_or(0);
+                        tel.input_tokens =
+                            Some(tel.input_tokens.unwrap_or(0) + input + read + write);
                         let output = tok.get("output").and_then(|x| x.as_u64()).unwrap_or(0);
                         let reasoning = tok.get("reasoning").and_then(|x| x.as_u64()).unwrap_or(0);
-                        tel.output_tokens = Some(tel.output_tokens.unwrap_or(0) + output + reasoning);
+                        tel.output_tokens =
+                            Some(tel.output_tokens.unwrap_or(0) + output + reasoning);
                     }
                 }
                 Some("tool_use") => {
@@ -230,7 +242,9 @@ fn count_tool_mentions(stdout: &str, stderr: &str, tools: &[&str]) -> u64 {
     let mut n = 0;
     for line in stdout.lines().chain(stderr.lines()) {
         for t in tools {
-            if line.contains(&format!("\"name\":\"{}\"", t)) || line.contains(&format!("tool_use.*{}", t)) {
+            if line.contains(&format!("\"name\":\"{}\"", t))
+                || line.contains(&format!("tool_use.*{}", t))
+            {
                 n += 1;
                 break;
             }
@@ -250,7 +264,9 @@ fn newest_session_file() -> Option<PathBuf> {
             break;
         }
         seen += 1;
-        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
         for e in rd.filter_map(|e| e.ok()) {
             let p = e.path();
             if p.is_dir() {
@@ -272,9 +288,14 @@ fn parse_claude_session(path: &Path) -> Result<ParsedTelemetry> {
     let text = std::fs::read_to_string(path)?;
     let mut tel = ParsedTelemetry::default();
     for line in text.lines().rev().take(500) {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         if tel.input_tokens.is_none() {
-            for cand in [v.get("usage"), v.get("message").and_then(|m| m.get("usage"))] {
+            for cand in [
+                v.get("usage"),
+                v.get("message").and_then(|m| m.get("usage")),
+            ] {
                 if let Some(u) = cand {
                     tel.input_tokens = u.get("input_tokens").and_then(|x| x.as_u64());
                     tel.output_tokens = u.get("output_tokens").and_then(|x| x.as_u64());
@@ -285,7 +306,11 @@ fn parse_claude_session(path: &Path) -> Result<ParsedTelemetry> {
             }
         }
         if v.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-            if let Some(arr) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
+            if let Some(arr) = v
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
                 for item in arr {
                     if item.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
                         tel.tool_calls = Some(tel.tool_calls.unwrap_or(0) + 1);
@@ -310,7 +335,11 @@ pub fn run(args: BenchmarkArgs) -> Result<()> {
     }
     let reps = args.reps.max(1);
     // testFile entries resolve relative to the tasks.json directory.
-    let tasks_dir = args.tasks.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    let tasks_dir = args
+        .tasks
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
 
     // The cleaned tree MUST come only from Diet Code's deterministic cleanup (no AI cleanup).
     println!("Analyzing repository for deterministic cleanup...");
@@ -323,7 +352,9 @@ pub fn run(args: BenchmarkArgs) -> Result<()> {
     );
 
     // Snapshot current HEAD so BASE == current commit.
-    let base_commit = git_output(&root, &["rev-parse", "HEAD"])?.trim().to_string();
+    let base_commit = git_output(&root, &["rev-parse", "HEAD"])?
+        .trim()
+        .to_string();
     println!("Base commit: {}", base_commit);
 
     // Agent discovery: prefers `opencode` (free-tier friendly), falls back to `claude`.
@@ -353,8 +384,29 @@ pub fn run(args: BenchmarkArgs) -> Result<()> {
     let mut runs: Vec<RunMetrics> = Vec::new();
     for (branch, ti, rep) in order {
         let task = &tasks[ti];
-        println!("\n=== task '{}' branch={} rep={} ===", task.name, branch, rep + 1);
-        match run_once(&root, &work_base, &tasks_dir, &base_commit, &plan, branch, task, rep, &agent_cmd, &agent_kind, &args.agent_model, &args.agent_args, args.timeout_secs, args.mock, parser.as_ref()) {
+        println!(
+            "\n=== task '{}' branch={} rep={} ===",
+            task.name,
+            branch,
+            rep + 1
+        );
+        match run_once(
+            &root,
+            &work_base,
+            &tasks_dir,
+            &base_commit,
+            &plan,
+            branch,
+            task,
+            rep,
+            &agent_cmd,
+            &agent_kind,
+            &args.agent_model,
+            &args.agent_args,
+            args.timeout_secs,
+            args.mock,
+            parser.as_ref(),
+        ) {
             Ok(m) => {
                 println!(
                     "  success={} elapsed={:.1}s files_modified={} tokens={:?}",
@@ -428,11 +480,19 @@ fn resolve_agent_command(override_cmd: Option<String>, mock: bool) -> Result<(St
     }
     // Runtime discovery: prefer `opencode` (works with free-tier models),
     // fall back to `claude`.
-    let opencode = Command::new("opencode").arg("--help").stdout(Stdio::null()).stderr(Stdio::null()).status();
+    let opencode = Command::new("opencode")
+        .arg("--help")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
     if matches!(opencode, Ok(s) if s.success()) {
         return Ok(("opencode".to_string(), AgentKind::Opencode));
     }
-    let probe = Command::new("claude").arg("--help").stdout(Stdio::null()).stderr(Stdio::null()).status();
+    let probe = Command::new("claude")
+        .arg("--help")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
     match probe {
         Ok(s) if s.success() => Ok(("claude".to_string(), AgentKind::Claude)),
         _ => bail!("no agent found: `opencode --help` and `claude --help` both failed. Pass --agent-command or use --mock."),
@@ -463,12 +523,20 @@ fn run_once(
     std::fs::create_dir_all(dir.parent().unwrap()).ok();
     // Clone base commit fresh (no preloaded Diet Code findings in the prompt; same base commit).
     let clone_status = Command::new("git")
-        .args(["clone", "-q", &root.to_string_lossy(), &dir.to_string_lossy()])
+        .args([
+            "clone",
+            "-q",
+            &root.to_string_lossy(),
+            &dir.to_string_lossy(),
+        ])
         .status()?;
     if !clone_status.success() {
         bail!("git clone failed");
     }
-    let _ = Command::new("git").args(["checkout", "-q", base_commit]).current_dir(&dir).status();
+    let _ = Command::new("git")
+        .args(["checkout", "-q", base_commit])
+        .current_dir(&dir)
+        .status();
     // For DIET: apply the identical deterministic cleanup (byte-range edits + git rm), no AI involved.
     if branch == "diet" {
         apply_deterministic_plan(&dir, plan)?;
@@ -492,9 +560,21 @@ fn run_once(
         // Simulate an agent doing work proportional to repo size: list files.
         let count = count_source_files(&dir);
         std::thread::sleep(std::time::Duration::from_millis(50));
-        (format!("{{\"mock\":true,\"files\":{}}}", count), String::new(), Some(0))
+        (
+            format!("{{\"mock\":true,\"files\":{}}}", count),
+            String::new(),
+            Some(0),
+        )
     } else {
-        invoke_agent(agent_cmd, agent_kind, agent_model, agent_args, &dir, &task.prompt, timeout_secs)?
+        invoke_agent(
+            agent_cmd,
+            agent_kind,
+            agent_model,
+            agent_args,
+            &dir,
+            &task.prompt,
+            timeout_secs,
+        )?
     };
     let elapsed = start.elapsed().as_secs_f64();
 
@@ -522,7 +602,11 @@ fn run_once(
         elapsed_secs: elapsed,
         success: verify_ok,
         agent_exit: exit_code,
-        token_note: if total.is_none() { Some("token metrics unavailable".to_string()) } else { None },
+        token_note: if total.is_none() {
+            Some("token metrics unavailable".to_string())
+        } else {
+            None
+        },
     })
 }
 
@@ -558,7 +642,15 @@ fn invoke_agent(
         AgentKind::Claude | AgentKind::External => {
             // Non-interactive invocation. Flags differ per installed version; prefer `-p` when supported.
             let help = Command::new(cmd).arg("--help").output();
-            let help_text = help.map(|o| format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))).unwrap_or_default();
+            let help_text = help
+                .map(|o| {
+                    format!(
+                        "{}{}",
+                        String::from_utf8_lossy(&o.stdout),
+                        String::from_utf8_lossy(&o.stderr)
+                    )
+                })
+                .unwrap_or_default();
             let mut args: Vec<String> = Vec::new();
             if help_text.contains("-p, --print") || help_text.contains("--print") {
                 args.push("-p".to_string());
@@ -573,7 +665,12 @@ fn invoke_agent(
 }
 
 /// Run a child process with a wall-clock timeout; kills on expiry.
-fn run_with_timeout(cmd: &str, args: &[String], workdir: &Path, timeout_secs: u64) -> Result<(String, String, Option<i32>)> {
+fn run_with_timeout(
+    cmd: &str,
+    args: &[String],
+    workdir: &Path,
+    timeout_secs: u64,
+) -> Result<(String, String, Option<i32>)> {
     use std::process::Stdio;
     let mut child = Command::new(cmd)
         .args(args)
@@ -598,7 +695,11 @@ fn run_with_timeout(cmd: &str, args: &[String], workdir: &Path, timeout_secs: u6
                     let out = child.wait_with_output()?;
                     return Ok((
                         String::from_utf8_lossy(&out.stdout).to_string(),
-                        format!("{}\n[TIMEOUT after {}s: agent killed]", String::from_utf8_lossy(&out.stderr), timeout_secs),
+                        format!(
+                            "{}\n[TIMEOUT after {}s: agent killed]",
+                            String::from_utf8_lossy(&out.stderr),
+                            timeout_secs
+                        ),
                         None,
                     ));
                 }
@@ -619,7 +720,10 @@ fn link_node_modules(root: &Path, dir: &Path) {
     }
 }
 
-fn apply_deterministic_plan(workdir: &Path, plan: &diet_code_core::edits::CleanupPlan) -> Result<()> {
+fn apply_deterministic_plan(
+    workdir: &Path,
+    plan: &diet_code_core::edits::CleanupPlan,
+) -> Result<()> {
     for f in &plan.delete_files {
         let p = workdir.join(f);
         if p.exists() {
@@ -663,7 +767,9 @@ fn count_source_files(dir: &Path) -> usize {
     let mut n = 0;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
         for e in rd.filter_map(|e| e.ok()) {
             let p = e.path();
             if p.is_dir() {
@@ -684,7 +790,10 @@ fn count_source_files(dir: &Path) -> usize {
 }
 
 fn count_modified_files(workdir: &Path) -> usize {
-    let out = Command::new("git").args(["status", "--porcelain"]).current_dir(workdir).output();
+    let out = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(workdir)
+        .output();
     match out {
         Ok(o) => String::from_utf8_lossy(&o.stdout)
             .lines()
@@ -700,9 +809,15 @@ fn count_modified_files(workdir: &Path) -> usize {
 
 fn run_shell(workdir: &Path, cmd: &str) -> bool {
     let status = if cfg!(windows) {
-        Command::new("cmd").args(["/C", cmd]).current_dir(workdir).status()
+        Command::new("cmd")
+            .args(["/C", cmd])
+            .current_dir(workdir)
+            .status()
     } else {
-        Command::new("sh").args(["-c", cmd]).current_dir(workdir).status()
+        Command::new("sh")
+            .args(["-c", cmd])
+            .current_dir(workdir)
+            .status()
     };
     matches!(status, Ok(s) if s.success())
 }
@@ -752,16 +867,25 @@ fn pct_change(base: Option<f64>, diet: Option<f64>) -> Option<f64> {
 fn summarize(runs: &[RunMetrics], tasks: &[Task]) -> Vec<TaskReport> {
     let mut out = Vec::new();
     for t in tasks {
-        let base: Vec<&RunMetrics> = runs.iter().filter(|r| r.task == t.name && r.branch == "base").collect();
-        let diet: Vec<&RunMetrics> = runs.iter().filter(|r| r.task == t.name && r.branch == "diet").collect();
-        let sum = |rs: &[&RunMetrics], f: fn(&RunMetrics) -> Option<f64>| median(rs.iter().filter_map(|r| f(r)).collect());
+        let base: Vec<&RunMetrics> = runs
+            .iter()
+            .filter(|r| r.task == t.name && r.branch == "base")
+            .collect();
+        let diet: Vec<&RunMetrics> = runs
+            .iter()
+            .filter(|r| r.task == t.name && r.branch == "diet")
+            .collect();
+        let sum = |rs: &[&RunMetrics], f: fn(&RunMetrics) -> Option<f64>| {
+            median(rs.iter().filter_map(|r| f(r)).collect())
+        };
         let b = Summary {
             input_tokens_median: sum(&base, |r| r.input_tokens.map(|x| x as f64)),
             output_tokens_median: sum(&base, |r| r.output_tokens.map(|x| x as f64)),
             total_tokens_median: sum(&base, |r| r.total_tokens.map(|x| x as f64)),
             tool_calls_median: sum(&base, |r| r.tool_calls.map(|x| x as f64)),
             files_read_median: sum(&base, |r| r.files_read.map(|x| x as f64)),
-            files_modified_median: median(base.iter().map(|r| r.files_modified as f64).collect()).unwrap_or(0.0),
+            files_modified_median: median(base.iter().map(|r| r.files_modified as f64).collect())
+                .unwrap_or(0.0),
             elapsed_median: median(base.iter().map(|r| r.elapsed_secs).collect()).unwrap_or(0.0),
         };
         let d = Summary {
@@ -770,11 +894,20 @@ fn summarize(runs: &[RunMetrics], tasks: &[Task]) -> Vec<TaskReport> {
             total_tokens_median: sum(&diet, |r| r.total_tokens.map(|x| x as f64)),
             tool_calls_median: sum(&diet, |r| r.tool_calls.map(|x| x as f64)),
             files_read_median: sum(&diet, |r| r.files_read.map(|x| x as f64)),
-            files_modified_median: median(diet.iter().map(|r| r.files_modified as f64).collect()).unwrap_or(0.0),
+            files_modified_median: median(diet.iter().map(|r| r.files_modified as f64).collect())
+                .unwrap_or(0.0),
             elapsed_median: median(diet.iter().map(|r| r.elapsed_secs).collect()).unwrap_or(0.0),
         };
-        let sb = format!("{}/{}", base.iter().filter(|r| r.success).count(), base.len());
-        let sd = format!("{}/{}", diet.iter().filter(|r| r.success).count(), diet.len());
+        let sb = format!(
+            "{}/{}",
+            base.iter().filter(|r| r.success).count(),
+            base.len()
+        );
+        let sd = format!(
+            "{}/{}",
+            diet.iter().filter(|r| r.success).count(),
+            diet.len()
+        );
         out.push(TaskReport {
             task: t.name.clone(),
             input_token_change_pct: pct_change(b.input_tokens_median, d.input_tokens_median),
@@ -851,8 +984,14 @@ fn print_report(reports: &[TaskReport], runs: &[RunMetrics]) {
             "Input token change: {}",
             fmt_pct(r.input_token_change_pct, "token metrics unavailable")
         );
-        println!("Tool calls:         {}", fmt_pct(r.tool_call_change_pct, "tool-call metrics unavailable"));
-        println!("Files explored:     {}", fmt_pct(r.files_read_change_pct, "files-read metrics unavailable"));
+        println!(
+            "Tool calls:         {}",
+            fmt_pct(r.tool_call_change_pct, "tool-call metrics unavailable")
+        );
+        println!(
+            "Files explored:     {}",
+            fmt_pct(r.files_read_change_pct, "files-read metrics unavailable")
+        );
         println!(
             "Success:              base {} vs diet {}",
             r.success_base, r.success_diet

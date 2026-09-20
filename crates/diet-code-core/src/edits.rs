@@ -32,7 +32,12 @@ impl CleanupPlan {
 pub fn remove_byte_range(text: &str, start: usize, end: usize) -> anyhow::Result<String> {
     let bytes = text.as_bytes();
     if start >= bytes.len() || end > bytes.len() || start >= end {
-        anyhow::bail!("stale byte range ({}..{}) for text of {} bytes", start, end, bytes.len());
+        anyhow::bail!(
+            "stale byte range ({}..{}) for text of {} bytes",
+            start,
+            end,
+            bytes.len()
+        );
     }
     let mut s = start;
     while s > 0 && bytes[s - 1] != b'\n' {
@@ -60,7 +65,10 @@ pub fn remove_byte_range(text: &str, start: usize, end: usize) -> anyhow::Result
 
 /// Apply several symbol removals to one file's text. Removals must not overlap;
 /// they are applied in descending byte order for stability.
-pub fn apply_symbol_removals(text: &str, removals: &mut Vec<SymbolRemoval>) -> anyhow::Result<String> {
+pub fn apply_symbol_removals(
+    text: &str,
+    removals: &mut Vec<SymbolRemoval>,
+) -> anyhow::Result<String> {
     removals.sort_by(|a, b| b.start_byte.cmp(&a.start_byte));
     let mut out = text.to_string();
     for r in removals.iter() {
@@ -174,8 +182,14 @@ fn contains_word(haystack: &str, word: &str) -> bool {
     while let Some(pos) = haystack[idx..].find(word) {
         let s = idx + pos;
         let e = s + word.len();
-        let before = haystack[..s].chars().last().map(|c| c.is_alphanumeric() || c == '_' || c == '$');
-        let after = haystack[e..].chars().next().map(|c| c.is_alphanumeric() || c == '_' || c == '$');
+        let before = haystack[..s]
+            .chars()
+            .last()
+            .map(|c| c.is_alphanumeric() || c == '_' || c == '$');
+        let after = haystack[e..]
+            .chars()
+            .next()
+            .map(|c| c.is_alphanumeric() || c == '_' || c == '$');
         if !before.unwrap_or(false) && !after.unwrap_or(false) {
             return true;
         }

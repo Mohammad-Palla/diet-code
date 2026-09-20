@@ -13,7 +13,8 @@ fn fixture_src(name: &str) -> PathBuf {
 
 /// Copy a fixture into a fresh temp dir, init a git repo, commit. Returns the dir.
 fn temp_repo(name: &str, tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("diet-code-cli-test-{}-{}", tag, std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("diet-code-cli-test-{}-{}", tag, std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     copy_dir(&fixture_src(name), &dir);
@@ -39,13 +40,21 @@ fn copy_dir(src: &Path, dst: &Path) {
 }
 
 fn git(dir: &Path, args: &[&str]) {
-    let st = Command::new("git").args(args).current_dir(dir).status().unwrap();
+    let st = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .unwrap();
     assert!(st.success(), "git {:?} failed", args);
 }
 
 fn run(args: &[&str]) -> (bool, String) {
     let out = Command::new(bin()).args(args).output().unwrap();
-    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     (out.status.success(), text)
 }
 
@@ -58,7 +67,9 @@ fn analyze_json_reports_fixture_finding() {
     assert_eq!(v["version"], 1);
     let findings = v["findings"].as_array().unwrap();
     assert!(
-        findings.iter().any(|f| f["symbol"] == "unusedHelper" && f["kind"] == "dead_function"),
+        findings
+            .iter()
+            .any(|f| f["symbol"] == "unusedHelper" && f["kind"] == "dead_function"),
         "expected unusedHelper finding:\n{}",
         text
     );
@@ -67,10 +78,23 @@ fn analyze_json_reports_fixture_finding() {
 #[test]
 fn explain_shows_evidence() {
     let dir = temp_repo("unused-file", "explain");
-    let (ok, text) = run(&["explain", "src/utils/old-auth.ts", "--path", dir.to_str().unwrap()]);
+    let (ok, text) = run(&[
+        "explain",
+        "src/utils/old-auth.ts",
+        "--path",
+        dir.to_str().unwrap(),
+    ]);
     assert!(ok, "explain failed:\n{}", text);
-    assert!(text.contains("DEAD FILE"), "expected classification:\n{}", text);
-    assert!(text.contains("Confidence"), "expected confidence:\n{}", text);
+    assert!(
+        text.contains("DEAD FILE"),
+        "expected classification:\n{}",
+        text
+    );
+    assert!(
+        text.contains("Confidence"),
+        "expected confidence:\n{}",
+        text
+    );
 }
 
 #[test]
@@ -78,7 +102,11 @@ fn clean_dry_run_proposes_patch_plan() {
     let dir = temp_repo("unused-function", "dryrun");
     let (ok, text) = run(&["clean", dir.to_str().unwrap(), "--dry-run"]);
     assert!(ok, "clean --dry-run failed:\n{}", text);
-    assert!(text.contains("unusedHelper"), "plan must mention symbol:\n{}", text);
+    assert!(
+        text.contains("unusedHelper"),
+        "plan must mention symbol:\n{}",
+        text
+    );
 }
 
 #[test]
@@ -89,10 +117,18 @@ fn clean_applies_deterministic_diff() {
     assert!(ok, "clean failed:\n{}", text);
     // g() removed, f() kept.
     let util = std::fs::read_to_string(dir.join("src/util.js")).unwrap();
-    assert!(!util.contains("function g()"), "dead g() removed:\n{}", util);
+    assert!(
+        !util.contains("function g()"),
+        "dead g() removed:\n{}",
+        util
+    );
     assert!(util.contains("function f()"), "live f() kept:\n{}", util);
     // On a branch, working tree reflects the diff.
-    let branch = Command::new("git").args(["branch", "--show-current"]).current_dir(&dir).output().unwrap();
+    let branch = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
     assert!(String::from_utf8_lossy(&branch.stdout).contains("diet-code/"));
 }
 

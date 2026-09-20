@@ -69,7 +69,9 @@ pub fn run(args: CleanArgs) -> Result<()> {
             if !run_shell(&root, cmd) {
                 eprintln!("verification failed: {}", cmd);
                 if !args.keep {
-                    println!("→ reverting cleanup (use --keep to retain the branch for inspection)");
+                    println!(
+                        "→ reverting cleanup (use --keep to retain the branch for inspection)"
+                    );
                     let _ = git(&root, &["checkout", "--", "."]);
                     // Remove untracked deletions? Files were `git rm`'d — restore via checkout HEAD.
                     let _ = git(&root, &["reset", "--hard", "HEAD"]);
@@ -85,10 +87,17 @@ pub fn run(args: CleanArgs) -> Result<()> {
     }
 
     // 8. Show diff stat.
-    let stat = git_output(&root, &["diff", "--stat", &format!("{}...HEAD", head.trim())])
-        .unwrap_or_default();
+    let stat = git_output(
+        &root,
+        &["diff", "--stat", &format!("{}...HEAD", head.trim())],
+    )
+    .unwrap_or_default();
     println!("\nDiff vs {}:\n{}", head.trim(), stat);
-    println!("\nCleanup applied on branch {}. Review with `git diff {}...HEAD`.", branch, head.trim());
+    println!(
+        "\nCleanup applied on branch {}. Review with `git diff {}...HEAD`.",
+        branch,
+        head.trim()
+    );
     Ok(())
 }
 
@@ -102,7 +111,10 @@ fn print_plan(plan: &diet_code_core::edits::CleanupPlan) {
         println!("DELETE {}", f);
     }
     for s in &plan.remove_symbols {
-        println!("\nREMOVE SYMBOL\n{}:{}-{}\n{}()", s.file, s.start_line, s.end_line, s.symbol);
+        println!(
+            "\nREMOVE SYMBOL\n{}:{}-{}\n{}()",
+            s.file, s.start_line, s.end_line, s.symbol
+        );
     }
     println!("\nNo other source modifications proposed.");
 }
@@ -149,8 +161,7 @@ fn apply_plan(root: &Path, plan: &diet_code_core::edits::CleanupPlan) -> Result<
     }
     for (file, mut syms) in by_file {
         let abs = root.join(file);
-        let text = std::fs::read_to_string(&abs)
-            .with_context(|| format!("reading {}", file))?;
+        let text = std::fs::read_to_string(&abs).with_context(|| format!("reading {}", file))?;
         let mut text = edits::apply_symbol_removals(&text, &mut syms)
             .with_context(|| format!("applying removals in {}", file))?;
         // Remove now-unused imports only when they are mechanically proven unnecessary.
@@ -162,9 +173,15 @@ fn apply_plan(root: &Path, plan: &diet_code_core::edits::CleanupPlan) -> Result<
 
 fn run_shell(root: &Path, cmd: &str) -> bool {
     let status = if cfg!(windows) {
-        Command::new("cmd").args(["/C", cmd]).current_dir(root).status()
+        Command::new("cmd")
+            .args(["/C", cmd])
+            .current_dir(root)
+            .status()
     } else {
-        Command::new("sh").args(["-c", cmd]).current_dir(root).status()
+        Command::new("sh")
+            .args(["-c", cmd])
+            .current_dir(root)
+            .status()
     };
     matches!(status, Ok(s) if s.success())
 }

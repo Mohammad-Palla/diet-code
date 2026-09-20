@@ -30,8 +30,10 @@ impl TsAliasConfig {
             if let Some(paths) = co.get("paths").and_then(|p| p.as_object()) {
                 for (k, vs) in paths {
                     if let Some(arr) = vs.as_array() {
-                        let targets: Vec<String> =
-                            arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect();
+                        let targets: Vec<String> = arr
+                            .iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect();
                         cfg.paths.push((k.clone(), targets));
                     }
                 }
@@ -186,7 +188,11 @@ impl Resolver {
         let package_name = std::fs::read_to_string(root.join("package.json"))
             .ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-            .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()));
+            .and_then(|v| {
+                v.get("name")
+                    .and_then(|n| n.as_str())
+                    .map(|s| s.to_string())
+            });
         Self {
             root: root.to_path_buf(),
             aliases,
@@ -201,7 +207,8 @@ impl Resolver {
     }
 
     pub fn is_bare_package(&self, spec: &str) -> bool {
-        !self.is_relative(spec) && !spec.starts_with('/') && !spec.starts_with("@/") || (spec.contains('/') && !spec.starts_with('.') && !self.alias_matches(spec))
+        !self.is_relative(spec) && !spec.starts_with('/') && !spec.starts_with("@/")
+            || (spec.contains('/') && !spec.starts_with('.') && !self.alias_matches(spec))
         // Actually bare packages are non-relative non-alias. We return true if it looks like a package
         // and no alias matches. Simplify: if not relative and no alias match and not absolute alias path.
     }

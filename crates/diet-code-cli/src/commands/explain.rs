@@ -30,22 +30,37 @@ pub fn run(args: ExplainArgs) -> Result<()> {
         if let Some(sym) = &f.symbol {
             println!("Symbol: {} (lines {}-{})", sym, f.start_line, f.end_line);
         }
-        println!("\nClassification: {}", f.kind.as_str().to_uppercase().replace('_', " "));
+        println!(
+            "\nClassification: {}",
+            f.kind.as_str().to_uppercase().replace('_', " ")
+        );
         println!("Confidence: {}", output::confidence_label(&f.confidence));
         println!("\nEvidence");
         for r in &f.reasons {
             println!("✓ {}", r);
         }
-        println!("✓ {} production importer(s) in reachability graph", prod_importers(&result, &f.file));
+        println!(
+            "✓ {} production importer(s) in reachability graph",
+            prod_importers(&result, &f.file)
+        );
         println!(
             "✓ production reachable: {} / test reachable: {} / references: {}",
             f.production_reachable, f.test_reachable, f.reference_count
         );
         if let Some(g) = &f.git {
             println!("\nGit evidence (supporting only)");
-            println!("✓ last modified: {}", g.last_modified.as_deref().unwrap_or("unknown"));
-            println!("✓ first seen: {}", g.first_seen.as_deref().unwrap_or("unknown"));
-            println!("✓ last author: {}", g.last_author.as_deref().unwrap_or("unknown"));
+            println!(
+                "✓ last modified: {}",
+                g.last_modified.as_deref().unwrap_or("unknown")
+            );
+            println!(
+                "✓ first seen: {}",
+                g.first_seen.as_deref().unwrap_or("unknown")
+            );
+            println!(
+                "✓ last author: {}",
+                g.last_author.as_deref().unwrap_or("unknown")
+            );
             println!("✓ commits touching file: {}", g.commit_count);
         }
         println!("\nRecommendation:");

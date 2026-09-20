@@ -202,5 +202,7 @@ fn bfs_symbols(
         }
     }
     // Remove pseudo nodes from result? Keep them out.
-    seen.into_iter().filter(|s| !s.ends_with("::__file__")).collect()
+    seen.into_iter()
+        .filter(|s| !s.ends_with("::__file__"))
+        .collect()
 }
