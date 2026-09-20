@@ -8,8 +8,8 @@ driven by one GitHub Release.
 
 | Channel | Command | Notes |
 |---|---|---|
-| npm (primary) | `npm install -g diet-code` | Node 18+, no native build; `postinstall` downloads + checksum-verifies the platform binary |
-| npx | `npx diet-code analyze .` | zero-install run |
+| npm (primary) | `npm install -g @mohammadpalla/diet-code` | Node 18+, no native build; `postinstall` downloads + checksum-verifies the platform binary |
+| npx | `npx @mohammadpalla/diet-code analyze .` | zero-install run |
 | shell installer | `curl -fsSL …/scripts/install.sh \| sh` | Linux/macOS → `~/.local/bin`, checksum-verified |
 | crates.io | `cargo install diet-code-cli` | for Rust users |
 | GitHub Release assets | direct download | used by the above |

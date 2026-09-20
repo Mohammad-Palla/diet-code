@@ -52,8 +52,8 @@ source.
 
 ```bash
 # npm (recommended — Node 18+, no Rust, no native build)
-npm install -g diet-code
-npx diet-code analyze .          # or run without installing
+npm install -g @mohammadpalla/diet-code
+npx @mohammadpalla/diet-code analyze .   # or run without installing
 ```
 
 ```bash

@@ -9,13 +9,13 @@ binary** — no Rust toolchain, no native build step, no runtime dependencies.
 ## Install
 
 ```bash
-npm install -g diet-code
+npm install -g @mohammadpalla/diet-code
 ```
 
 or run without installing:
 
 ```bash
-npx diet-code analyze .
+npx @mohammadpalla/diet-code analyze .
 ```
 
 The `postinstall` script downloads the prebuilt binary for your platform
