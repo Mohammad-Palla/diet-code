@@ -1,0 +1,11 @@
+{
+  "name": "dist-entry-lib",
+  "version": "1.0.0",
+  "main": "./distribution/index.js",
+  "types": "./distribution/index.d.ts",
+  "exports": {
+    "types": "./distribution/index.d.ts",
+    "default": "./distribution/index.js"
+  },
+  "files": ["distribution"]
+}

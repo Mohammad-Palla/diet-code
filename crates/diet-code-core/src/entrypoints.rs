@@ -789,11 +789,30 @@ fn candidate_stems(t: &str) -> Vec<String> {
             None => t,
         }
     };
-    for prefix in ["dist/", "build/", "lib/", "out/", "esm/", "cjs/"] {
+    for prefix in [
+        "dist/",
+        "distribution/",
+        "build/",
+        "lib/",
+        "out/",
+        "esm/",
+        "cjs/",
+        "umd/",
+        "output/",
+    ] {
         if let Some(rest) = without_ext.strip_prefix(prefix) {
-            for src_pre in ["src/", ""] {
+            // Published output maps back to a source tree; projects use either
+            // `src/` or the spelled-out `source/` (e.g. sindresorhus packages),
+            // or keep sources at the package root.
+            for src_pre in ["src/", "source/", ""] {
                 for ext in ["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"] {
                     out.push(format!("{}{}.{}", src_pre, rest, ext));
+                }
+                // The output entry may itself be a directory index
+                // (`distribution/index.js` -> `source/index.ts` already covered,
+                // but also `distribution/foo` -> `source/foo/index.ts`).
+                for ext in ["ts", "tsx", "js", "jsx"] {
+                    out.push(format!("{}{}/index.{}", src_pre, rest, ext));
                 }
             }
         }
@@ -812,7 +831,7 @@ fn candidate_stems(t: &str) -> Vec<String> {
     out.push(format!("{}/index.d.ts", without_ext));
     // basename under conventional source roots (`types: index.d.ts` -> types/index.d.ts)
     if let Some(base) = without_ext.rsplit('/').next() {
-        for dir in ["types/", "src/"] {
+        for dir in ["types/", "src/", "source/"] {
             out.push(format!("{}{}", dir, base));
             out.push(format!("{}{}.d.ts", dir, base.trim_end_matches(".d.ts")));
         }

@@ -354,6 +354,43 @@ fn html_entry_web_reachability() {
     );
 }
 
+/// A package whose `main`/`exports` point at built output in `distribution/`
+/// while the real sources live in `source/` (the sindresorhus layout, e.g.
+/// `ky`). Before the dist->src entry mapping covered `distribution/` +
+/// `source/`, the package entry resolved to nothing, so the entire `source/`
+/// tree was flagged HIGH `dead_file`. Both sides must hold: reachable source
+/// stays live, a true orphan is still reported.
+#[test]
+fn dist_entry_maps_to_source_tree() {
+    let r = analyze("dist-entry-package");
+
+    for live in [
+        "source/index.ts",
+        "source/utils/normalize.ts",
+        "source/core/constants.ts",
+    ] {
+        assert!(
+            !has(&r, FindingKind::DeadFile, live),
+            "{live} must be live (reachable via distribution->source entry), got {:?}",
+            kinds(&r)
+        );
+    }
+    assert!(
+        !auto_removable(&r)
+            .iter()
+            .any(|f| f.file == "source/core/constants.ts"),
+        "transitively-imported constants.ts must never be auto-removable: {:?}",
+        kinds(&r)
+    );
+
+    // The genuine orphan is still reported.
+    assert!(
+        has(&r, FindingKind::DeadFile, "source/utils/orphan.ts"),
+        "orphan.ts must be reported dead, got {:?}",
+        kinds(&r)
+    );
+}
+
 /// Differential validation oracle (development only).
 /// If `fossil-mcp` is installed locally it is used as a test oracle to surface
 /// missing graph edges / false positives. Never required: all other tests must
