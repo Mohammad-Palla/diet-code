@@ -1,6 +1,6 @@
 [package]
 name = "diet-code-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Diet Code CLI - put your AI coding agent on a diet"
 license = "MIT"
