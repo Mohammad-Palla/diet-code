@@ -132,6 +132,14 @@ fn rough_import_locals(line: &str) -> Vec<String> {
     if t.starts_with('\'') || t.starts_with('"') {
         return out;
     }
+    // Every ES import that binds a name has a `from` clause. Without one the
+    // line is not a binding import this function can read: it may be Python
+    // (`import numpy as np`), a TS `import fs = require("fs")`, or the opening
+    // line of a multi-line clause. Claiming bindings there would delete a live
+    // import, so report none.
+    if !t.contains(" from ") {
+        return out;
+    }
     let clause = match t.split(" from ").next() {
         Some(c) => c,
         None => return out,

@@ -94,3 +94,24 @@ fn prunes_only_proven_unused_imports() {
         out
     );
 }
+
+/// A Python `import x as y` has no `from` clause, so the ES-import pruner must
+/// not claim to understand its bindings and delete a live import.
+#[test]
+fn leaves_python_imports_alone() {
+    let text = "import numpy as np\n\nvalues = np.array([1, 2])\n";
+    assert_eq!(prune_unused_imports(text), text);
+    let from_form = "from pkg.models import User\n\nuser = User('ada')\n";
+    assert_eq!(prune_unused_imports(from_form), from_form);
+    // Even a genuinely unused Python import stays: `import` runs module-level
+    // code whose side effects may be the reason it is there.
+    let side_effect = "import app.signals\n\nprint('ready')\n";
+    assert_eq!(prune_unused_imports(side_effect), side_effect);
+}
+
+/// `import fs = require("fs")` binds `fs` without a `from` clause.
+#[test]
+fn leaves_ts_require_style_imports_alone() {
+    let text = "import fs = require(\"fs\")\n\nfs.readFileSync(\"x\");\n";
+    assert_eq!(prune_unused_imports(text), text);
+}
