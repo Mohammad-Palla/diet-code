@@ -164,8 +164,14 @@ fn apply_plan(root: &Path, plan: &diet_code_core::edits::CleanupPlan) -> Result<
         let text = std::fs::read_to_string(&abs).with_context(|| format!("reading {}", file))?;
         let mut text = edits::apply_symbol_removals(&text, &mut syms)
             .with_context(|| format!("applying removals in {}", file))?;
-        // Remove now-unused imports only when they are mechanically proven unnecessary.
-        text = edits::prune_unused_imports(&text);
+        // Remove now-unused imports only when they are mechanically proven
+        // unnecessary. Python is excluded: `import pkg` is an executable
+        // statement whose side effects (registering models, codecs, plugins)
+        // can matter even when the bound name is unused, so dropping it is
+        // never provably safe.
+        if !(file.ends_with(".py") || file.ends_with(".pyi")) {
+            text = edits::prune_unused_imports(&text);
+        }
         std::fs::write(&abs, text).with_context(|| format!("writing {}", file))?;
     }
     Ok(())

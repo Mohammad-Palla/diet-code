@@ -5,6 +5,7 @@ pub mod findings;
 pub mod graph;
 pub mod imports;
 pub mod parser;
+pub mod python;
 pub mod reachability;
 pub mod resolver;
 pub mod symbols;
@@ -20,7 +21,7 @@ use edits::CleanupPlan;
 use entrypoints::{is_default_ignored, is_test_file, DietConfig, EntrySets, IgnoreRules};
 use findings::{Finding, FindingKind, GitEvidence};
 use graph::{build_binding_maps, resolve_references, Graph};
-use imports::{ImportRec, ReExportRec, ReferenceRec};
+use imports::{ImportKind, ImportRec, ReExportRec, ReferenceRec};
 use parser::{to_rel_slash, ParsedFile};
 use reachability::{compute_reachability, Reachability};
 use resolver::Resolver;
@@ -85,6 +86,11 @@ pub struct AnalysisResult {
     pub spread_vars: HashSet<(String, String)>,
     /// derived class id -> base class ids (resolved heritage for overrides).
     pub heritage_links: HashMap<String, Vec<String>>,
+    /// Ids of Python declarations that do not start at column 0, i.e. that live
+    /// inside a block (`class C:`, `def outer():`, `except ImportError:`).
+    /// Deleting the only statement of a Python block leaves a syntax error, so
+    /// these are reported for review but never auto-removed.
+    pub python_nested_entities: HashSet<String>,
     pub config: DietConfig,
 }
 
@@ -182,13 +188,52 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
     let mut spread_vars: HashSet<(String, String)> = HashSet::new();
     let mut heritage_pairs: Vec<(String, String, String)> = Vec::new();
 
+    // Package initialisers already credited to an importer, so that a file
+    // importing several modules of one package does not inflate its importer
+    // count.
+    let mut package_init_edges: HashSet<(String, String)> = HashSet::new();
+
     for p in &parsed {
+        let is_py = p.language.is_python();
         for mut imp in p.imports.clone() {
-            imp.resolved_file = resolver.resolve(&p.rel_path, &imp.source_raw);
+            // Python imports are resolved by the Python module resolver
+            // (module-path + package `__init__` semantics differ from JS).
+            if is_py {
+                imp.resolved_file =
+                    python::resolve_python_import(&p.rel_path, &imp.source_raw, &file_set);
+                // Importing `pkg.mod` executes `pkg/__init__.py` first: record
+                // that implicit edge so package initialisers are reachable.
+                if let Some(target) = imp.resolved_file.clone() {
+                    for init in python::package_init_chain(&target, &file_set) {
+                        if init == p.rel_path
+                            || !package_init_edges.insert((p.rel_path.clone(), init.clone()))
+                        {
+                            continue;
+                        }
+                        imports.push(ImportRec {
+                            from_file: p.rel_path.clone(),
+                            source_raw: imp.source_raw.clone(),
+                            resolved_file: Some(init),
+                            local_name: "*package-init*".to_string(),
+                            original_name: "*".to_string(),
+                            is_type_only: false,
+                            kind: ImportKind::SideEffect,
+                            line: imp.line,
+                        });
+                    }
+                }
+            } else {
+                imp.resolved_file = resolver.resolve(&p.rel_path, &imp.source_raw);
+            }
             imports.push(imp);
         }
         for mut re in p.reexports.clone() {
-            re.resolved_file = resolver.resolve(&p.rel_path, &re.source_raw);
+            if is_py {
+                re.resolved_file =
+                    python::resolve_python_import(&p.rel_path, &re.source_raw, &file_set);
+            } else {
+                re.resolved_file = resolver.resolve(&p.rel_path, &re.source_raw);
+            }
             reexports.push(re);
         }
         references.extend(p.references.iter().cloned());
@@ -208,6 +253,13 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
             publishes_members.insert(p.rel_path.clone());
         }
         if p.is_executable_script {
+            executable_scripts.insert(p.rel_path.clone());
+        }
+        // Examples and samples are run by hand and linked from documentation;
+        // nothing imports them by design. Scoped to Python: whether a JS/TS
+        // `examples/` directory should be protected the same way is a separate
+        // question about existing behaviour, not part of Python support.
+        if p.language.is_python() && entrypoints::is_example_file(&p.rel_path) {
             executable_scripts.insert(p.rel_path.clone());
         }
         if p.has_top_level_calls {
@@ -234,6 +286,30 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
             file_dynamic.insert(p.rel_path.clone(), p.dynamic_details.clone());
         }
         local_exports_map.insert(p.rel_path.clone(), p.local_exports.clone());
+    }
+
+    // 3b. Python has no enforced visibility: `from .mod import _helper` is legal
+    //     and routine (dunder metadata in `__version__.py`, helpers shared
+    //     across a package). Another module importing a name by name is a fact
+    //     that outranks the underscore convention, so such a name is public
+    //     surface even though the convention calls it private.
+    {
+        let mut imported_names: HashSet<(String, String)> = HashSet::new();
+        for imp in &imports {
+            if let Some(target) = &imp.resolved_file {
+                if target.ends_with(".py") || target.ends_with(".pyi") {
+                    imported_names.insert((target.clone(), imp.original_name.clone()));
+                }
+            }
+        }
+        for e in entities.iter_mut() {
+            if e.parent.is_none()
+                && !e.exported
+                && imported_names.contains(&(e.file.clone(), e.name.clone()))
+            {
+                e.exported = true;
+            }
+        }
     }
 
     // 4. Declaration merging (TypeScript): overload signatures and same-name,
@@ -432,7 +508,23 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
     );
 
     // Files executed via package.json scripts anywhere in the repo.
-    let script_refs = entrypoints::script_referenced_files(&root, &file_set);
+    let mut script_refs = entrypoints::script_referenced_files(&root, &file_set);
+    // Modules a Python tooling config imports by name (Sphinx `pygments_style`,
+    // nox/invoke task modules): loaded by the tool, never imported by the code.
+    script_refs.extend(entrypoints::python_config_referenced_files(
+        &root, &file_set,
+    ));
+    // Modules Python names in strings rather than importing (settings, lazy
+    // class paths, entry-point groups, CLI module arguments).
+    let python_sources: Vec<(String, String)> = parsed
+        .iter()
+        .filter(|p| p.language.is_python())
+        .map(|p| (p.rel_path.clone(), p.source.clone()))
+        .collect();
+    let (string_referenced, string_referenced_prefixes) =
+        entrypoints::python_string_referenced_modules(&root, &python_sources, &file_set);
+    script_refs.extend(string_referenced);
+    let script_refs = script_refs;
     // Files referenced by CI workflow files.
     let workflow_refs = entrypoints::workflow_referenced_files(&root, &file_set);
     // Owner scopes whose methods may run via computed dispatch (`handlers[key]()`):
@@ -492,8 +584,34 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
         }
     }
 
+    // Python declarations that sit inside a block: removing the last statement
+    // of a block is a syntax error, so these can never be auto-removed.
+    let mut python_nested_entities: HashSet<String> = HashSet::new();
+    for p in &parsed {
+        if !p.language.is_python() {
+            continue;
+        }
+        let bytes = p.source.as_bytes();
+        for e in &p.entities {
+            let at_column_zero =
+                e.start_byte == 0 || bytes.get(e.start_byte.saturating_sub(1)) == Some(&b'\n');
+            if !at_column_zero {
+                python_nested_entities.insert(e.id.clone());
+            }
+        }
+    }
+
     // 8. Entrypoints.
-    let entries = entrypoints::discover_entrypoints(&root, &rel_files, &config);
+    let mut entries = entrypoints::discover_entrypoints(&root, &rel_files, &config);
+    // A Python file with a `__main__` guard (or a shebang) is a program the user
+    // runs directly, so it roots its own import graph. Unlike a Node script,
+    // which `package.json` would name, nothing else in the repo declares it.
+    for p in &parsed {
+        if p.language.is_python() && p.is_executable_script {
+            entries.production.insert(p.rel_path.clone());
+        }
+    }
+    let entries = entries;
 
     // 9. Reachability.
     let reachability = compute_reachability(
@@ -507,7 +625,11 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
     );
 
     // 10. Dynamic protected prefixes (variable dynamic imports with static prefix).
-    let dynamic_protected_prefixes = compute_dynamic_prefixes(&parsed, &root);
+    let mut dynamic_protected_prefixes = compute_dynamic_prefixes(&parsed, &root);
+    // A package named in a string is a plugin/command directory: anything under
+    // it may be loaded by name.
+    dynamic_protected_prefixes.extend(string_referenced_prefixes);
+    let dynamic_protected_prefixes = dynamic_protected_prefixes;
 
     // 11. Importer counts split prod/test.
     let mut file_importers_prod: HashMap<String, usize> = HashMap::new();
@@ -562,6 +684,7 @@ pub fn analyze_repository(root: &Path) -> anyhow::Result<AnalysisResult> {
         dangling_calls,
         spread_vars,
         heritage_links,
+        python_nested_entities,
         config,
     };
     result.findings = compute_findings(&result, &graph);
@@ -1334,15 +1457,23 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         };
 
         // Confidence gate.
-        let confidence: Confidence;
+        let mut confidence: Confidence;
+        // Python has no `export` keyword: visibility follows the leading
+        // underscore convention and the enclosing scope, so the reason text has
+        // to say that rather than claim an export exists.
+        let is_python_file = e.file.ends_with(".py") || e.file.ends_with(".pyi");
         let mut reasons: Vec<String> = vec![
             "no references".to_string(),
             if effectively_exported {
                 if namespace_surface && !e.exported {
                     "reachable through an exported namespace".to_string()
+                } else if is_python_file {
+                    "importable module-level name; any consumer may import it".to_string()
                 } else {
                     "exported but no internal importers".to_string()
                 }
+            } else if is_python_file {
+                "not part of the module's importable surface".to_string()
             } else {
                 "not exported".to_string()
             },
@@ -1459,6 +1590,17 @@ fn compute_findings(result: &AnalysisResult, graph: &Graph) -> Vec<Finding> {
         } else {
             confidence = Confidence::Certain;
             reasons.push("no dynamic usage detected".to_string());
+        }
+
+        // Python: a declaration inside a block (method, class attribute, nested
+        // or conditional def) cannot be deleted mechanically — if it is the only
+        // statement in that block, removing it leaves a syntax error. Report it,
+        // but never hand it to the automatic cleaner.
+        if confidence.auto_removable() && result.python_nested_entities.contains(&e.id) {
+            confidence = Confidence::Medium;
+            reasons.push(
+                "Python declaration nested in a block; removing it may empty the block".to_string(),
+            );
         }
 
         // Test-reachable symbols with zero direct callers (odd) — mark HIGH at most? Already skipped test_reach above.

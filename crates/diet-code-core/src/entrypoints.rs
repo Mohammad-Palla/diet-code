@@ -51,6 +51,13 @@ pub fn is_test_file(rel: &str) -> bool {
     if file.contains(".test.") || file.contains(".spec.") || file.contains(".test-d.") {
         return true;
     }
+    // Python: pytest/unittest collect `test_*.py` and `*_test.py`, and
+    // `conftest.py` holds fixtures loaded by the runner.
+    if let Some(stem) = file.strip_suffix(".py") {
+        if stem == "conftest" || stem.starts_with("test_") || stem.ends_with("_test") {
+            return true;
+        }
+    }
     false
 }
 
@@ -209,6 +216,12 @@ pub fn script_referenced_files(root: &Path, files: &HashSet<String>) -> HashSet<
 }
 
 fn find_package_jsons(root: &Path) -> Vec<std::path::PathBuf> {
+    find_manifests(root, &["package.json"])
+}
+
+/// Walks the repository for manifest files with any of `names`, skipping
+/// ignored directories and symlinks.
+fn find_manifests(root: &Path, names: &[&str]) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -229,8 +242,12 @@ fn find_package_jsons(root: &Path) -> Vec<std::path::PathBuf> {
                     continue;
                 }
                 stack.push(path);
-            } else if ft.is_file() && entry.file_name().to_str() == Some("package.json") {
-                out.push(path);
+            } else if ft.is_file() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if names.contains(&name) {
+                        out.push(path);
+                    }
+                }
             }
         }
     }
@@ -355,6 +372,17 @@ pub fn discover_entrypoints(root: &Path, all_files: &[String], config: &DietConf
     // a production root. This is a FACT (the browser loads it), never a guess.
     for f in html_script_entries(root, &set) {
         out.production.insert(f);
+    }
+
+    // 3d. Python entry points: installed console scripts, `python -m` targets
+    // and the conventional app/server entries.
+    let (py_production, py_public) = python_entries(root, &set);
+    for f in py_production {
+        out.production.insert(f);
+    }
+    for f in py_public {
+        out.package_export_files.insert(f.clone());
+        out.package_entries.insert(f);
     }
 
     // 4. Tests form separate root set.
@@ -604,6 +632,333 @@ fn normalize_entry(root: &Path, ep: &str) -> String {
         root.join(p)
     };
     to_rel_slash(root, &abs)
+}
+
+/// Python entry points, from packaging metadata and interpreter conventions.
+/// Returns `(production, public_surface)`.
+///
+/// `pyproject.toml` and `setup.py` declare console scripts as
+/// `"command = pkg.module:func"`, and `[project] name` names the distributed
+/// package. Instead of parsing TOML (and `setup.py`'s arbitrary Python), every
+/// quoted string in the manifest is taken as a *candidate* dotted module path:
+/// a candidate only becomes an entry when it resolves to a real `.py` file in
+/// the repository, so unrelated strings (`">=3.9"`, `"README.md"`, dependency
+/// names) filter themselves out.
+fn python_entries(root: &Path, files: &HashSet<String>) -> (HashSet<String>, HashSet<String>) {
+    let mut production: HashSet<String> = HashSet::new();
+    let mut public: HashSet<String> = HashSet::new();
+
+    for manifest in find_manifests(root, &["pyproject.toml", "setup.py"]) {
+        let Ok(text) = std::fs::read_to_string(&manifest) else {
+            continue;
+        };
+        let dir = manifest.parent().unwrap_or(root);
+        let base = crate::parser::to_rel_slash(root, dir);
+        for module in manifest_module_candidates(&text) {
+            let Some(file) = resolve_python_module(files, &base, &module) else {
+                continue;
+            };
+            // A package root (`pkg/__init__.py`) is the distribution's public
+            // API; a plain module (`pkg/cli.py`) is a program entry.
+            if file.ends_with("__init__.py") {
+                public.insert(file.clone());
+                // Everything a consumer can deep-import from the distribution.
+                if let Some(dir) = file.strip_suffix("/__init__.py") {
+                    for m in distribution_public_modules(dir, files) {
+                        public.insert(m);
+                    }
+                }
+            }
+            production.insert(file);
+        }
+    }
+
+    for f in files {
+        if !f.ends_with(".py") {
+            continue;
+        }
+        let name = f.rsplit('/').next().unwrap_or(f);
+        // `python -m pkg` executes `pkg/__main__.py`; Django generates
+        // `manage.py`; a WSGI/ASGI server imports the callable in
+        // `wsgi.py`/`asgi.py`.
+        if matches!(name, "__main__.py" | "manage.py" | "wsgi.py" | "asgi.py") {
+            production.insert(f.clone());
+        }
+        // `import pkg` executes `pkg/__init__.py`. Consumers outside the
+        // repository reach it by package name, and no import inside the
+        // repository records that, so a package initialiser is public surface:
+        // reportable, never auto-removable.
+        if name == "__init__.py" {
+            public.insert(f.clone());
+        }
+    }
+
+    (production, public)
+}
+
+/// Modules and packages named by a string literal anywhere in the repository's
+/// Python sources or packaging metadata.
+///
+/// Python resolves module paths out of strings constantly, and none of it shows
+/// up as an import edge: lazy class paths (`amqp_cls = 'celery.app.amqp:AMQP'`),
+/// component settings (`"scrapy.extensions.logcount.LogCount"`), entry-point
+/// groups (`group = "scrapy.commands"`), CLI arguments
+/// (`["-A", "t.unit.bin.proj.app"]`), Django's `ROOT_URLCONF`. A module named
+/// this way is loaded by name, so zero import edges says nothing about whether
+/// it runs — it can never be proven dead by imports alone.
+///
+/// Returns `(module files, package directory prefixes)`: a string naming a
+/// package protects the modules under it, which is how plugin directories are
+/// loaded (`walk_modules(COMMANDS_MODULE)`).
+///
+/// At least two dotted segments are required, so a bare word in prose or a
+/// dependency name cannot protect anything. The longest match wins, so
+/// `"pkg.mod.Class"` protects `pkg/mod.py` rather than all of `pkg/`.
+pub fn python_string_referenced_modules(
+    root: &Path,
+    sources: &[(String, String)],
+    files: &HashSet<String>,
+) -> (HashSet<String>, Vec<String>) {
+    let mut referenced: HashSet<String> = HashSet::new();
+    let mut prefixes: Vec<String> = Vec::new();
+
+    let mut texts: Vec<String> = sources.iter().map(|(_, src)| src.clone()).collect();
+    // Packaging metadata names plugin modules the same way (`entry_points`).
+    for manifest in find_manifests(root, &["pyproject.toml", "setup.cfg", "tox.ini"]) {
+        if let Ok(text) = std::fs::read_to_string(&manifest) {
+            texts.push(text);
+        }
+    }
+
+    for text in &texts {
+        for raw in quoted_strings(text) {
+            // `module:attr` and `module.Attr` both name a module on the left.
+            let token = raw.split(':').next().unwrap_or("").trim();
+            if !is_dotted_module(token) {
+                continue;
+            }
+            let segments: Vec<&str> = token.split('.').collect();
+            if segments.len() < 2 {
+                continue;
+            }
+            for keep in (2..=segments.len()).rev() {
+                let module = segments[..keep].join(".");
+                let Some(file) = resolve_python_module(files, "", &module) else {
+                    continue;
+                };
+                // A package name protects what it contains: that is exactly how
+                // plugin and command directories get loaded.
+                if let Some(dir) = file.strip_suffix("/__init__.py") {
+                    if !prefixes.iter().any(|p| p == dir) {
+                        prefixes.push(dir.to_string());
+                    }
+                }
+                referenced.insert(file);
+                break;
+            }
+        }
+    }
+
+    (referenced, prefixes)
+}
+
+/// Modules named by a *string* inside a Python tooling config. Sphinx resolves
+/// `pygments_style = "flask_theme_support.FlaskyStyle"` by importing that module
+/// at build time, usually after adding its directory to `sys.path`; nox and
+/// invoke reference task modules the same way. Such a file is loaded by the
+/// tool and never imported by the package, so it is reported for review and
+/// never auto-removed.
+///
+/// Matching is restricted to the config's own directory subtree (when it has
+/// one), since that is where a tool-local `sys.path` addition can point.
+pub fn python_config_referenced_files(root: &Path, files: &HashSet<String>) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for cfg in files
+        .iter()
+        .filter(|f| f.ends_with(".py") && is_tooling_config(f))
+    {
+        let Ok(text) = std::fs::read_to_string(root.join(cfg)) else {
+            continue;
+        };
+        let dir = match cfg.rsplit_once('/') {
+            Some((d, _)) => d.to_string(),
+            None => String::new(),
+        };
+        for raw in quoted_strings(&text) {
+            let token = raw.trim();
+            if !is_dotted_module(token) {
+                continue;
+            }
+            // `a.b.C` may name module `a.b` holding `C`, or module `a.b.C`.
+            let segments: Vec<&str> = token.split('.').collect();
+            for keep in (1..=segments.len()).rev() {
+                let rel_path = format!("{}.py", segments[..keep].join("/"));
+                let suffix = format!("/{}", rel_path);
+                for f in files {
+                    if !f.ends_with(".py") {
+                        continue;
+                    }
+                    let in_scope = dir.is_empty() || f.starts_with(&format!("{}/", dir));
+                    if in_scope && (*f == rel_path || f.ends_with(&suffix)) {
+                        out.insert(f.clone());
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Modules a consumer can deep-import from a declared distribution.
+///
+/// Python has no `exports` map: once `pkg` is installed, `import pkg.any.module`
+/// works for every module in it, so a public module cannot be proven dead from
+/// repository imports alone — deprecation shims that only re-export from a
+/// renamed private module look exactly like dead files. The underscore
+/// convention is the one visibility signal Python offers, so `_private.py` (and
+/// anything inside a `_private/` subpackage) stays analyzable while public
+/// modules are treated as surface.
+fn distribution_public_modules(pkg_dir: &str, files: &HashSet<String>) -> Vec<String> {
+    if pkg_dir.is_empty() {
+        // A package rooted at the repository root would swallow tests and
+        // tooling; there is no distribution subtree to delimit.
+        return Vec::new();
+    }
+    let prefix = format!("{}/", pkg_dir);
+    let mut out = Vec::new();
+    for f in files {
+        if !(f.ends_with(".py") || f.ends_with(".pyi")) {
+            continue;
+        }
+        let Some(rest) = f.strip_prefix(prefix.as_str()) else {
+            continue;
+        };
+        if rest.is_empty() {
+            continue;
+        }
+        let segments: Vec<&str> = rest.split('/').collect();
+        let reachable = segments.iter().enumerate().all(|(i, seg)| {
+            if i + 1 == segments.len() {
+                let stem = seg
+                    .strip_suffix(".py")
+                    .or_else(|| seg.strip_suffix(".pyi"))
+                    .unwrap_or(seg);
+                stem == "__init__" || !stem.starts_with('_')
+            } else {
+                !seg.starts_with('_')
+            }
+        });
+        if reachable {
+            out.push(f.clone());
+        }
+    }
+    out
+}
+
+/// Quoted strings in a Python manifest that could name a module, with any
+/// `name = ` prefix and `:callable` suffix stripped.
+fn manifest_module_candidates(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in quoted_strings(text) {
+        let after_eq = raw.rsplit('=').next().unwrap_or(&raw);
+        let module = after_eq.split(':').next().unwrap_or("").trim();
+        if is_dotted_module(module) && !out.iter().any(|m| m == module) {
+            out.push(module.to_string());
+        }
+    }
+    out
+}
+
+/// String literals in a Python or TOML config, scanned one line at a time.
+///
+/// Per-line scanning matters: prose apostrophes (`don't`, `aren't`) appear in
+/// comments in almost every real config, and a whole-file scan pairs them with
+/// the next unrelated quote and silently loses every literal after that point.
+/// A module path or entry point never spans lines, so resetting at each newline
+/// costs nothing and cannot desynchronise. `#` outside a literal begins a
+/// comment in both languages.
+fn quoted_strings(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '#' {
+                break;
+            }
+            if c == '"' || c == '\'' {
+                let mut j = i + 1;
+                let mut buf = String::new();
+                let mut closed = false;
+                while j < chars.len() {
+                    if chars[j] == '\\' && j + 1 < chars.len() {
+                        buf.push(chars[j + 1]);
+                        j += 2;
+                        continue;
+                    }
+                    if chars[j] == c {
+                        closed = true;
+                        break;
+                    }
+                    buf.push(chars[j]);
+                    j += 1;
+                }
+                if closed {
+                    out.push(buf);
+                    i = j + 1;
+                    continue;
+                }
+                // Unterminated on this line: prose, not a literal.
+                break;
+            }
+            i += 1;
+        }
+    }
+    out
+}
+
+fn is_dotted_module(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    s.split('.').all(|seg| {
+        !seg.is_empty()
+            && seg
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphabetic() || c == '_')
+            && seg.chars().all(|c| c.is_alphanumeric() || c == '_')
+    })
+}
+
+/// Resolves a dotted module path against a manifest directory, honouring both
+/// flat and `src/` layouts.
+fn resolve_python_module(files: &HashSet<String>, base: &str, module: &str) -> Option<String> {
+    let rel = module.replace('.', "/");
+    for src_root in ["", "src"] {
+        let mut prefix = String::new();
+        for part in [base, src_root] {
+            if part.is_empty() {
+                continue;
+            }
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(part);
+        }
+        let path = if prefix.is_empty() {
+            rel.clone()
+        } else {
+            format!("{}/{}", prefix, rel)
+        };
+        for cand in [format!("{}.py", path), format!("{}/__init__.py", path)] {
+            if files.contains(&cand) {
+                return Some(cand);
+            }
+        }
+    }
+    None
 }
 
 fn package_entry_files(root: &Path, files: &HashSet<String>) -> (Vec<String>, Vec<String>) {
@@ -875,6 +1230,19 @@ pub fn is_tooling_config(rel: &str) -> bool {
         "postcss.config.js",
         "tailwind.config.js",
         "nodemon.json",
+        // Python tooling: each of these is executed by its tool (Sphinx imports
+        // `conf.py`, nox/invoke/fabric import their task files, setuptools runs
+        // `setup.py`), never imported by the package itself.
+        "conf.py",
+        "setup.py",
+        "noxfile.py",
+        "tasks.py",
+        "fabfile.py",
+        "sitecustomize.py",
+        "usercustomize.py",
+        // Hatch loads `hatch_build.py` by filename for
+        // `[tool.hatch.build.hooks.custom]`.
+        "hatch_build.py",
     ];
     if EXACT.contains(&f) {
         return true;
@@ -892,6 +1260,19 @@ pub fn is_tooling_config(rel: &str) -> bool {
         "vite.config.",
     ];
     PREFIX.iter().any(|p| f.starts_with(p))
+}
+
+/// Whether a file is demonstration code: an example or sample a reader runs by
+/// hand (`locust -f examples/basic.py`, `python examples/demo.py`) and that
+/// documentation links to. Nothing imports it by design, so import edges cannot
+/// speak to whether it is wanted. Report for review, never auto-remove.
+pub fn is_example_file(rel: &str) -> bool {
+    rel.split('/').any(|comp| {
+        matches!(
+            comp,
+            "example" | "examples" | "sample" | "samples" | "demo" | "demos"
+        )
+    })
 }
 
 /// Whether a file is loaded by test-runner convention rather than imports

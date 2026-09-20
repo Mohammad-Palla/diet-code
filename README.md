@@ -36,7 +36,7 @@ BEFORE/AFTER agent-work table
 ## What v0.1 is (and is not)
 
 **It is:** a local-first static repository analyzer + deterministic cleanup
-tool + agent benchmark for TypeScript/JavaScript.
+tool + agent benchmark for TypeScript/JavaScript and Python.
 
 **It is not:** an AI refactoring assistant, MCP server, context server,
 code-indexing SaaS, or generic linter. There is **no LLM inside the
@@ -146,7 +146,8 @@ task success.** v0.1 exists to test that claim, not to assert it.
 1. **Traversal** — recursive walk; ignores `.git/ node_modules/ dist/
    build/ coverage/ .next/ .nuxt/ .turbo/ .cache/ vendor/ target/` plus
    `diet-code.json` include/exclude and `.dietignore`; no symlinked dirs;
-   parallel parsing (Rust + tree-sitter, TS vs TSX grammars per extension).
+   parallel parsing (Rust + tree-sitter, TS vs TSX vs Python grammars per
+   extension).
 2. **AST extraction** — functions, arrows, function expressions, classes,
    methods, variables, enums, interfaces, type aliases, namespaces, with
    byte offsets (for edits) and 1-based lines (for output).
@@ -158,7 +159,10 @@ task success.** v0.1 exists to test that claim, not to assert it.
    barrel files (`export *`, named re-exports, chains), default/namespace/
    aliased imports, CommonJS `require` (incl. destructured), `module.exports`
    forms, `export =`, package self-imports, `/// <reference path>` via
-   declaration files, subpackage `package.json` entries (monorepos).
+   declaration files, subpackage `package.json` entries (monorepos). Python
+   resolves dotted specifiers against packages (`pkg/mod.py` vs
+   `pkg/mod/__init__.py`), relative `.`/`..` levels, and flat/`src`/monorepo
+   roots.
 5. **Value vs type edges** — `import type` creates `TYPE` edges; computed
    type keys, heritage clauses, annotations, and generics included.
 6. **Reference extraction** — calls, `new`, identifiers, member calls with
@@ -168,12 +172,16 @@ task success.** v0.1 exists to test that claim, not to assert it.
 7. **Dynamic-use detection** — `import(expr)`, `require(expr)`,
    `import.meta.resolve(expr)`, `path.join/resolve(__dirname, …)`,
    `eval`, `Reflect.*`, global computed access, `obj[key]()` dispatch,
-   directory scans (`readdir`+`require`). Unresolvable dynamic loading
-   protects nearby files (prefix dirs) instead of pretending.
+   directory scans (`readdir`+`require`); in Python `importlib.import_module`,
+   `__import__`, `getattr`, `eval`/`exec`, `__subclasses__` and
+   `pkgutil.walk_packages`. Unresolvable dynamic loading protects nearby files
+   (prefix dirs) instead of pretending.
 8. **Entry points** — `diet-code.json` first, then `package.json`
    (`main/module/browser/exports/bin/types`, per package in monorepos),
-   then conservative conventions (`src/main.*`, `src/index.*`, …).
-   Tests (`test/`, `*.test.*`, …) form a **separate** root set.
+   `pyproject.toml`/`setup.py` console scripts and declared packages, then
+   conservative conventions (`src/main.*`, `src/index.*`, `__main__.py`,
+   `__main__` guards, …). Tests (`test/`, `*.test.*`, `test_*.py`, …) form a
+   **separate** root set.
 9. **Reachability** — file BFS from production ∪ public-surface ∪
    script-referenced entries; symbol BFS from production entry symbols
    (+ top-level statements). Records production/test reachability separately.
@@ -203,14 +211,45 @@ callback/hook objects, computed dispatch, inheritance hierarchies
 object spread are all capped at `MEDIUM`/`LOW` or skipped. What remains
 `CERTAIN` survived all of that.
 
+### Python specifics
+
+Python has no `export` keyword and no static types, so the same facts are read
+through Python's own rules rather than the ES-module ones:
+
+| Python fact | How it is treated |
+|---|---|
+| module-level name without a leading `_` | importable by any consumer → `MEDIUM` at best, never auto-removed |
+| `_name` / `__name` | private by convention → can reach `CERTAIN` |
+| `__all__` | declared `import *` surface; additive only (a name absent from it is still importable) |
+| `import pkg.mod` | also runs `pkg/__init__.py`, so package initialisers are reachable |
+| `pkg/__init__.py` | the package's import surface — reportable, never auto-removed |
+| `if __name__ == "__main__":`, `__main__.py`, `manage.py`, `wsgi.py`/`asgi.py` | program entry points that root the import graph |
+| `[project.scripts]` / `console_scripts` | installed commands are production roots |
+| `__init__`, `__enter__`, and other dunders | interpreter protocols, never dead-code candidates |
+| `@staticmethod`, `@property`, `@dataclass`, … | transformers: ordinary rules still apply, so unused ones are still reported |
+| any other decorator | the definition is handed to a callable we cannot follow → treated as used |
+| `test_*.py`, `*_test.py`, `conftest.py` | test scope, like `*.spec.ts` |
+| `importlib.import_module(f"pkg.{n}")`, `__import__("pkg." + n)` | the static prefix protects that directory |
+| `getattr`, `eval`/`exec`, `__subclasses__`, `pkgutil.walk_packages` | recorded as dynamic risk, capping confidence |
+
+Two Python-only safety rules exist because Python is whitespace-significant
+and duck-typed:
+
+- **Nested declarations are never auto-removed.** Deleting the only statement
+  of a `class`, `def`, or `except` block leaves a syntax error, so only
+  declarations starting at column 0 are eligible for automatic removal.
+- **Python imports are never pruned.** `import pkg` is an executable statement
+  whose side effects (registering models, codecs, plugins) can be the reason it
+  is there, so removing an apparently unused one is not provably safe.
+
 ### Cleanup safety (`clean`)
 
 Byte-range deletions from tree-sitter offsets (full lines only, no
 reformatting), `git rm` for dead files, mechanically-proven unused-import
-pruning only. Before touching anything: clean-tree check → record HEAD →
-new branch → apply → re-analyze → run discovered verify scripts
-(`typecheck`/`test`/`build` via the repo's package manager, or
-`verifyCommands`) → revert on failure unless `--keep`.
+pruning only (ES modules; see Python specifics above). Before touching
+anything: clean-tree check → record HEAD → new branch → apply → re-analyze →
+run discovered verify scripts (`typecheck`/`test`/`build` via the repo's
+package manager, or `verifyCommands`) → revert on failure unless `--keep`.
 
 ### Benchmark anti-bias rules
 
@@ -311,19 +350,21 @@ crates/diet-code-core/src/
                   entrypoints → reachability → findings → git evidence
   parser.rs       tree-sitter extraction (TS/TSX/JS/JSX), imports, refs,
                   dynamic-use signals, escape/publication signals
+  python.rs       Python extraction into the same ParsedFile shape: dotted
+                  module resolution, __all__, packages, decorators, dunders
   symbols.rs      Entity model (stable IDs, byte offsets)
   imports.rs      import / re-export / reference records (VALUE vs TYPE)
   resolver.rs     relative, tsconfig paths, barrels, CJS, self-imports
   graph.rs        file + symbol graphs, lexical-scope + receiver resolution
-  entrypoints.rs  diet-code.json, package.json(s), conventions, test sets,
-                  tooling/script/workflow/config guards
+  entrypoints.rs  diet-code.json, package.json(s), pyproject/setup.py,
+                  conventions, test sets, tooling/script/workflow/config guards
   reachability.rs BFS from production ∪ public ∪ script roots (+ test roots)
   findings.rs     finding kinds + stable JSON schema (version 1)
   confidence.rs   CERTAIN/HIGH/MEDIUM/LOW (+ auto-removable rule)
   edits.rs        deterministic byte-range removals + import pruning
 crates/diet-code-cli/src/
   main.rs  commands/{analyze,explain,clean,benchmark}.rs  output.rs
-fixtures/     20 fixture repos × expectations (cargo test)
+fixtures/     25 fixture repos × expectations (cargo test)
 benchmarks/got/  real-repo task pack + measured report
 ```
 

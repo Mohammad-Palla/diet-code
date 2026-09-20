@@ -10,6 +10,7 @@ pub enum Language {
     Tsx,
     JavaScript,
     Jsx,
+    Python,
 }
 
 impl Language {
@@ -25,6 +26,7 @@ impl Language {
             "js" | "mjs" | "cjs" => Some(Language::JavaScript),
             "jsx" => Some(Language::Jsx),
             "mjsx" | "cjsx" => Some(Language::Jsx),
+            "py" | "pyi" => Some(Language::Python),
             _ => None,
         }
     }
@@ -34,11 +36,18 @@ impl Language {
             Language::TypeScript => tree_sitter_typescript::language_typescript(),
             Language::Tsx => tree_sitter_typescript::language_tsx(),
             Language::JavaScript | Language::Jsx => tree_sitter_javascript::language(),
+            Language::Python => tree_sitter_python::language(),
         }
+    }
+
+    pub fn is_python(&self) -> bool {
+        matches!(self, Language::Python)
     }
 }
 
-pub const SUPPORTED_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "mjs", "cjs", "jsx", "mts", "cts"];
+pub const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "ts", "tsx", "js", "mjs", "cjs", "jsx", "mts", "cts", "py", "pyi",
+];
 
 /// Minified artifacts (vendored bundles) are generated code: analyzing them
 /// produces noise (single-letter scope on one line). Never analyze.
@@ -154,6 +163,11 @@ pub fn parse_source(
     language: Language,
     source: &str,
 ) -> Option<ParsedFile> {
+    // Python has fundamentally different module/reference semantics; it gets a
+    // dedicated extractor that emits the same ParsedFile shape.
+    if language.is_python() {
+        return crate::python::parse_python(abs_path, rel_path, source);
+    }
     let ts_lang: tree_sitter::Language = language.ts_language();
     let mut parser = Parser::new();
     parser.set_language(&ts_lang).ok()?;
@@ -254,7 +268,7 @@ struct Visitor<'a> {
     declared_names_stack: Vec<HashSet<String>>,
 }
 
-impl<'a> Visitor<'a> {
+impl Visitor<'_> {
     fn text(&self, node: &Node) -> &str {
         node.utf8_text(self.source.as_bytes()).unwrap_or("")
     }

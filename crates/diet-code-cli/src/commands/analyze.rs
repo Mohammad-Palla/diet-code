@@ -44,11 +44,29 @@ pub fn run(args: AnalyzeArgs) -> Result<()> {
     Ok(())
 }
 
+/// Languages actually present in the analyzed file set.
+fn language_label(files: &[String]) -> &'static str {
+    let mut python = false;
+    let mut web = false;
+    for f in files {
+        if f.ends_with(".py") || f.ends_with(".pyi") {
+            python = true;
+        } else {
+            web = true;
+        }
+    }
+    match (web, python) {
+        (true, true) => "TypeScript / JavaScript, Python",
+        (false, true) => "Python",
+        _ => "TypeScript / JavaScript",
+    }
+}
+
 fn print_human(result: &diet_code_core::AnalysisResult, verbose: bool) {
     use diet_code_core::findings::FindingKind;
 
     output::header(&format!("Repository: {}", result.repository));
-    println!("Language: TypeScript / JavaScript\n");
+    println!("Language: {}\n", language_label(&result.files));
 
     let (files, symbols, certain, high, medium, low) = result.summary_counts();
     println!("Files analyzed       {}", files);

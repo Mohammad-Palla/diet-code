@@ -1,0 +1,7 @@
+[project]
+name = "pkg"
+version = "0.1.0"
+description = "A tool that doesn't lose its entry points to an apostrophe."
+
+[project.scripts]
+pkg-cli = "pkg.cli:main"

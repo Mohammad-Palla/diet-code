@@ -434,3 +434,310 @@ fn differential_against_fossil_mcp_if_present() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Python
+// ---------------------------------------------------------------------------
+
+fn finding<'a>(
+    r: &'a diet_code_core::AnalysisResult,
+    kind: FindingKind,
+    symbol_or_file: &str,
+) -> &'a diet_code_core::findings::Finding {
+    r.findings
+        .iter()
+        .find(|f| {
+            f.kind == kind
+                && (f.symbol.as_deref() == Some(symbol_or_file) || f.file == symbol_or_file)
+        })
+        .unwrap_or_else(|| panic!("no {:?} for {}, got {:?}", kind, symbol_or_file, kinds(r)))
+}
+
+fn reports(r: &diet_code_core::AnalysisResult, symbol: &str) -> bool {
+    r.findings
+        .iter()
+        .any(|f| f.symbol.as_deref() == Some(symbol))
+}
+
+/// An underscore-prefixed helper cannot be imported by convention, so an
+/// unreferenced one is provably dead.
+#[test]
+fn python_private_helper_is_certain() {
+    let r = analyze("python-basic");
+    let f = finding(&r, FindingKind::DeadFunction, "_unused_private");
+    assert_eq!(f.confidence, Confidence::Certain);
+    assert!(f.confidence.auto_removable());
+}
+
+/// Python has no `export`, so a public module-level name could be imported by a
+/// consumer outside the repository: reportable, never auto-removable.
+#[test]
+fn python_public_symbol_is_never_auto_removable() {
+    let r = analyze("python-framework");
+    let f = finding(&r, FindingKind::DeadClass, "Draft");
+    assert!(!f.confidence.auto_removable());
+}
+
+#[test]
+fn python_live_symbols_are_not_reported() {
+    let r = analyze("python-basic");
+    // `run` is called from the `__main__` guard; `format_name` is imported by
+    // main.py; `_titlecase` is called by `format_name`; `_format` is called via
+    // `self._format()`; `Service` is constructed in main.py.
+    for name in ["run", "format_name", "_titlecase", "_format", "Service"] {
+        assert!(
+            !reports(&r, name),
+            "{} reported dead, got {:?}",
+            name,
+            kinds(&r)
+        );
+    }
+}
+
+/// A method reached through `x = Service()` / `x.describe()` stays alive: the
+/// receiver's class is known from the constructor call.
+#[test]
+fn python_receiver_typing_resolves_method_calls() {
+    let r = analyze("python-basic");
+    let service_describe = r
+        .findings
+        .iter()
+        .any(|f| f.symbol.as_deref() == Some("describe") && f.file == "pkg/service.py");
+    // `UnusedService.describe` is dead, `Service.describe` is not; exactly one
+    // `describe` finding may exist.
+    let count = r
+        .findings
+        .iter()
+        .filter(|f| f.symbol.as_deref() == Some("describe"))
+        .count();
+    assert!(
+        service_describe && count == 1,
+        "expected only the unused describe, got {:?}",
+        kinds(&r)
+    );
+}
+
+/// Importing `pkg.service` executes `pkg/__init__.py`, so the package
+/// initialiser is reachable even though nothing imports it by name.
+#[test]
+fn python_package_init_is_reachable_through_submodule_import() {
+    let r = analyze("python-basic");
+    assert!(
+        !r.findings.iter().any(|f| f.file == "pkg/__init__.py"),
+        "package init reported, got {:?}",
+        kinds(&r)
+    );
+}
+
+/// A `__main__` guard makes a file a program root: what it imports is reachable.
+#[test]
+fn python_main_guard_roots_the_import_graph() {
+    let r = analyze("python-basic");
+    assert!(r.entries.production.contains("main.py"));
+    for file in ["main.py", "pkg/service.py", "pkg/helpers.py"] {
+        assert!(
+            !r.findings
+                .iter()
+                .any(|f| f.file == file && f.kind == FindingKind::DeadFile),
+            "{} reported as dead file, got {:?}",
+            file,
+            kinds(&r)
+        );
+    }
+}
+
+#[test]
+fn python_orphan_module_is_certain() {
+    let r = analyze("python-basic");
+    let f = finding(&r, FindingKind::DeadFile, "pkg/orphan.py");
+    assert_eq!(f.confidence, Confidence::Certain);
+}
+
+/// Only the two provably-dead items in the fixture may be auto-removable.
+#[test]
+fn python_auto_removable_set_is_minimal() {
+    let r = analyze("python-basic");
+    let mut auto: Vec<String> = auto_removable(&r)
+        .iter()
+        .map(|f| f.symbol.clone().unwrap_or_else(|| f.file.clone()))
+        .collect();
+    auto.sort();
+    assert_eq!(auto, vec!["_unused_private", "pkg/orphan.py"]);
+}
+
+/// `@route(...)` passes the function to a callable this analysis cannot follow,
+/// so the handler is used, not dead.
+#[test]
+fn python_decorated_definitions_are_not_dead() {
+    let r = analyze("python-framework");
+    for name in ["list_users", "health"] {
+        assert!(
+            !reports(&r, name),
+            "{} reported dead, got {:?}",
+            name,
+            kinds(&r)
+        );
+    }
+}
+
+/// `@staticmethod` only rebinds the definition, so it must not mask dead code.
+#[test]
+fn python_transformer_decorator_does_not_mask_dead_code() {
+    let r = analyze("python-framework");
+    assert!(
+        has(&r, FindingKind::DeadMethod, "_unused_static"),
+        "expected dead _unused_static, got {:?}",
+        kinds(&r)
+    );
+}
+
+/// `[project.scripts]` installs a command that imports the module, so it is a
+/// production root.
+#[test]
+fn python_console_script_is_an_entrypoint() {
+    let r = analyze("python-framework");
+    assert!(
+        r.entries.production.contains("app/cli.py"),
+        "console script not discovered: {:?}",
+        r.entries.production
+    );
+    assert!(!reports(&r, "main"));
+}
+
+/// `[project] name` names the distributed package, whose `__init__.py` is the
+/// public surface: conservative, never auto-removed.
+#[test]
+fn python_declared_package_surface_is_public() {
+    let r = analyze("python-framework");
+    assert!(
+        r.entries.package_export_files.contains("app/__init__.py"),
+        "package surface not discovered: {:?}",
+        r.entries.package_export_files
+    );
+}
+
+/// `importlib.import_module(f"app.plugins.{name}")` keeps everything under the
+/// static prefix unremovable.
+#[test]
+fn python_dynamic_plugin_dir_is_never_auto_removable() {
+    // An application (no packaging metadata), so the distribution-surface rule
+    // cannot mask the dynamic-prefix mechanism under test here.
+    let r = analyze("python-plugins");
+    for f in auto_removable(&r) {
+        assert!(
+            !f.file.starts_with("plugins/"),
+            "dynamically loaded plugin marked auto-removable: {} ({:?})",
+            f.file,
+            f.confidence
+        );
+    }
+    // The fixture must still have teeth: a module nothing loads is removable.
+    let dead = finding(&r, FindingKind::DeadFile, "dead.py");
+    assert_eq!(dead.confidence, Confidence::Certain);
+}
+
+/// `pyproject.toml` declares `app` as a distribution, and Python has no
+/// `exports` map: a consumer may `import app.anything`. Nothing public inside a
+/// distributed package can therefore be proven dead from repository imports, so
+/// the cleanup plan for this fixture must be empty. (`python-basic` is the
+/// application case, where dead modules *are* auto-removable.)
+#[test]
+fn python_distribution_surface_is_never_auto_removable() {
+    let r = analyze("python-framework");
+    let auto: Vec<String> = auto_removable(&r)
+        .iter()
+        .map(|f| f.symbol.clone().unwrap_or_else(|| f.file.clone()))
+        .collect();
+    assert!(
+        auto.is_empty(),
+        "declared distribution surface marked auto-removable: {:?}",
+        auto
+    );
+    // It is still reported, so a human can review it.
+    assert!(r.findings.iter().any(|f| f.file == "app/dead.py"));
+}
+
+/// Deleting the only statement of a Python block leaves a syntax error, so a
+/// nested declaration is reported for review but never auto-removed — while a
+/// column-0 declaration in the same file still is.
+#[test]
+fn python_nested_declarations_are_never_auto_removable() {
+    let r = analyze("python-nested");
+    for name in ["_unused_internal", "_never_used"] {
+        let f = r
+            .findings
+            .iter()
+            .find(|f| f.symbol.as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("expected {} reported, got {:?}", name, kinds(&r)));
+        assert!(
+            !f.confidence.auto_removable(),
+            "{} is auto-removable; removing it could empty its block",
+            name
+        );
+        assert!(f
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("nested in a block")));
+    }
+    let top = finding(&r, FindingKind::DeadFunction, "_unused_top_level");
+    assert_eq!(top.confidence, Confidence::Certain);
+}
+
+/// `registry = _Registry()` types the receiver even though the class is private,
+/// so `registry.add(...)` resolves and `add` is not reported.
+#[test]
+fn python_private_class_receiver_resolves() {
+    let r = analyze("python-nested");
+    assert!(
+        !reports(&r, "add"),
+        "add reported despite registry.add() call, got {:?}",
+        kinds(&r)
+    );
+}
+
+/// A computed module name fixes the package it loads from, whether written as
+/// interpolation (`f"app.plugins.{n}"`) or concatenation
+/// (`__import__("app.handlers." + n)`). Both keep that directory unremovable.
+#[test]
+fn python_computed_module_names_protect_their_package() {
+    let r = analyze("python-plugins");
+    // Interpolation (`f"plugins.{name}"`) and concatenation
+    // (`__import__("handlers." + name)`) must both protect their directory.
+    for file in ["plugins/alpha.py", "handlers/beta.py"] {
+        let f = finding(&r, FindingKind::DeadFile, file);
+        assert!(
+            !f.confidence.auto_removable(),
+            "{} is auto-removable despite dynamic loading ({:?})",
+            file,
+            f.confidence
+        );
+    }
+}
+
+/// A Sphinx extension is named as a bare string in `conf.py`'s `extensions`
+/// list and imported by Sphinx at build time. Real configs carry prose
+/// apostrophes ("don't", "aren't") in comments above that list; a whole-file
+/// quote scan pairs them with the next unrelated quote and loses every literal
+/// after that point, which silently made the extension look dead.
+#[test]
+fn python_sphinx_extension_survives_apostrophes_in_comments() {
+    let r = analyze("python-sphinx-ext");
+    let ext = r
+        .findings
+        .iter()
+        .find(|f| f.file == "docs/_ext/llms_txt.py" && f.kind == FindingKind::DeadFile);
+    if let Some(f) = ext {
+        assert!(
+            !f.confidence.auto_removable(),
+            "Sphinx extension is auto-removable: {:?}",
+            f.confidence
+        );
+    }
+    // The console script declared in pyproject.toml must still be found, even
+    // though the manifest's description contains an apostrophe.
+    assert!(
+        r.entries.production.contains("pkg/cli.py"),
+        "console script lost to apostrophe desync: {:?}",
+        r.entries.production
+    );
+}
