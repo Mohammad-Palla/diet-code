@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **The `/diet-code` agent skill.** Ask an AI coding assistant "is this function
+  needed?" and get a verdict backed by evidence instead of a guess. The analyzer
+  proves whether anything reaches the code; the agent reads Git history to
+  explain why it is still there, including the commit that removed its last
+  caller (`git log -S`). A commit that documents deliberate retention overrides
+  a `CERTAIN` verdict, and the skill says so.
+  - `diet-code install` registers it with Claude Code
+    (`.claude/skills/diet-code/SKILL.md`, or `--global`), Cursor
+    (`.cursor/rules/diet-code.mdc`), or any assistant that reads `AGENTS.md`
+    (`--agent agents`, spliced idempotently so existing content survives).
+    `--dry-run` shows the destination and body without writing.
+  - The skill is a single file, `skills/diet-code/SKILL.md`, compiled into the
+    binary, so `install` works from npm, the shell installer or `cargo install`
+    without the repository on disk.
+  - The skill never deletes code: removal stays behind
+    `diet-code clean --apply` and explicit approval, and it is instructed never
+    to raise a confidence level.
+
+### Changed
+
+- `diet-code explain` now answers for code that is *alive*, not only for
+  findings. Previously a question about a live symbol printed "No findings
+  match", which left the question open. It now reports `KEPT (no dead-code
+  finding)` with what reaches the symbol — production entry point, package
+  public surface, or tests only — plus Git evidence, and distinguishes that from
+  a name that is not indexed at all.
+
 ## [0.2.0] - 2026-09-20
 
 ### Added

@@ -33,6 +33,48 @@ BEFORE/AFTER agent-work table
 
 ---
 
+## Ask your agent instead: the `/diet-code` skill
+
+```bash
+npm install -g @mohammadpalla/diet-code
+diet-code install          # registers the skill with your assistant
+```
+
+Then, in Claude Code (or Cursor, Codex, Amp, opencode — see `--agent`):
+
+```
+/diet-code is calculateLegacyTax needed
+```
+
+```text
+Verdict: NOT NEEDED (CERTAIN)
+
+Evidence
+- 0 references across 1,284 indexed symbols
+- not exported; not reachable from any entry point
+- no dynamic usage detected near it
+
+History
+- created 2022-04-18, last touched 2024-01-09 by Alice
+- "migrate auth to OAuth (#1821)" — the commit that removed its last caller
+
+Recommendation
+- safe to remove: `diet-code clean` covers it
+```
+
+The split matters: the **analyzer** proves whether anything reaches the code
+(deterministic, no model), and the **agent** reads Git history to explain *why*
+it is still there. A commit saying "temporary fallback, keep until v2 rollout"
+overrides a `CERTAIN` — and the skill instructs the agent to say so.
+
+The skill never deletes anything. Removal only happens through
+`diet-code clean --apply`, after you approve the printed plan.
+
+The skill is a single file, [`skills/diet-code/SKILL.md`](skills/diet-code/SKILL.md),
+compiled into the binary so `install` works from every distribution channel.
+
+---
+
 ## What v0.1 is (and is not)
 
 **It is:** a local-first static repository analyzer + deterministic cleanup
@@ -81,9 +123,19 @@ diet-code analyze .
 diet-code analyze . --json        # stable JSON schema (v1)
 diet-code analyze . --verbose     # all findings, not just CERTAIN/HIGH
 
-# Explain one finding with its deterministic evidence
+# Explain one symbol or file with its deterministic evidence + Git history.
+# Works whether the code is dead (finding + confidence) or alive
+# (KEPT, with what reaches it).
 diet-code explain src/utils/oldAuth.ts
-diet-code explain --path /path/to/repo <finding-id-or-file>
+diet-code explain calculateLegacyTax
+diet-code explain --path /path/to/repo <symbol-or-file>
+
+# Register the `/diet-code` skill with your AI coding assistant
+diet-code install                     # Claude Code, this project
+diet-code install --global            # Claude Code, all your projects
+diet-code install --agent cursor      # .cursor/rules/diet-code.mdc
+diet-code install --agent agents      # AGENTS.md (Codex, Amp, opencode, ...)
+diet-code install --dry-run           # show the target and body, write nothing
 
 # Preview the deterministic patch plan (changes nothing)
 diet-code clean --dry-run
@@ -363,7 +415,8 @@ crates/diet-code-core/src/
   confidence.rs   CERTAIN/HIGH/MEDIUM/LOW (+ auto-removable rule)
   edits.rs        deterministic byte-range removals + import pruning
 crates/diet-code-cli/src/
-  main.rs  commands/{analyze,explain,clean,benchmark}.rs  output.rs
+  main.rs  commands/{analyze,explain,clean,benchmark,install}.rs  output.rs
+skills/diet-code/SKILL.md  the `/diet-code` agent skill (embedded by `install`)
 fixtures/     25 fixture repos × expectations (cargo test)
 benchmarks/got/  real-repo task pack + measured report
 ```

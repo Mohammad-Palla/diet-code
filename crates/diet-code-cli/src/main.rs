@@ -25,6 +25,8 @@ enum Commands {
     Clean(commands::clean::CleanArgs),
     /// Run the agent diet benchmark (BASE vs DIET).
     Benchmark(commands::benchmark::BenchmarkArgs),
+    /// Register the `/diet-code` skill with your AI coding assistant.
+    Install(commands::install::InstallArgs),
 }
 
 fn main() -> Result<()> {
@@ -34,5 +36,6 @@ fn main() -> Result<()> {
         Commands::Explain(args) => commands::explain::run(args),
         Commands::Clean(args) => commands::clean::run(args),
         Commands::Benchmark(args) => commands::benchmark::run(args),
+        Commands::Install(args) => commands::install::run(args),
     }
 }
