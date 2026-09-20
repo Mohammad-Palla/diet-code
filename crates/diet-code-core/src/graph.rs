@@ -305,24 +305,22 @@ pub fn resolve_references(
                                 }
                             }
                         }
-                    } else {
-                        if let Some(ns_map) = namespace_imports.get(&r.from_file) {
-                            if let Some(ns_file) = ns_map.get(base) {
-                                let targets = follow_reexport(ns_file, &r.name, reexport_targets);
-                                let targets = if targets.is_empty() {
-                                    vec![(ns_file.clone(), r.name.clone())]
-                                } else {
-                                    targets
-                                };
-                                for (tf, orig) in targets {
-                                    if let Some(id) = lookup_symbol(graph, &tf, &orig) {
-                                        let from = r
-                                            .from_symbol
-                                            .clone()
-                                            .unwrap_or_else(|| file_pseudo(&r.from_file));
-                                        graph.add_symbol_edge(&from, &id, RefKind::Value);
-                                        linked = true;
-                                    }
+                    } else if let Some(ns_map) = namespace_imports.get(&r.from_file) {
+                        if let Some(ns_file) = ns_map.get(base) {
+                            let targets = follow_reexport(ns_file, &r.name, reexport_targets);
+                            let targets = if targets.is_empty() {
+                                vec![(ns_file.clone(), r.name.clone())]
+                            } else {
+                                targets
+                            };
+                            for (tf, orig) in targets {
+                                if let Some(id) = lookup_symbol(graph, &tf, &orig) {
+                                    let from = r
+                                        .from_symbol
+                                        .clone()
+                                        .unwrap_or_else(|| file_pseudo(&r.from_file));
+                                    graph.add_symbol_edge(&from, &id, RefKind::Value);
+                                    linked = true;
                                 }
                             }
                         }
