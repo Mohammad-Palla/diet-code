@@ -36,8 +36,8 @@ diet-code benchmark --tasks tasks.json --reps 3
 Full docs, methodology, and benchmark results:
 <https://github.com/Mohammad-Palla/diet-code#readme>
 
-Prefer building from source? `cargo install diet-code-cli` (crates.io) or
-`cargo install --path crates/diet-code-cli` (this repo).
+Prefer building from source? Clone the repo and run
+`cargo install --path crates/diet-code-cli`. Not published to crates.io.
 
 ## Supported platforms
 

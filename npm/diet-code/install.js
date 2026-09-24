@@ -71,8 +71,9 @@ async function main() {
     throw new Error(
       `[diet-code] unsupported platform: ${process.platform}-${process.arch}. ` +
         `Supported: ${Object.keys(PLATFORMS).join(', ')}. ` +
-        'Build from source instead: cargo install diet-code-cli ' +
-        '(https://github.com/Mohammad-Palla/diet-code).',
+        'Build from source instead: clone ' +
+        'https://github.com/Mohammad-Palla/diet-code and run ' +
+        '`cargo install --path crates/diet-code-cli`.',
     );
   }
 
@@ -124,6 +125,11 @@ async function main() {
 
 main().catch(error => {
   console.error(error && error.message ? error.message : error);
-  console.error('[diet-code] postinstall failed. Set DIET_CODE_SKIP_DOWNLOAD=1 to skip, or install from source: cargo install diet-code-cli');
+  console.error(
+    '[diet-code] postinstall failed. Set DIET_CODE_SKIP_DOWNLOAD=1 to skip, ' +
+      'download a binary from ' +
+      'https://github.com/Mohammad-Palla/diet-code/releases, ' +
+      'or build from a checkout: `cargo install --path crates/diet-code-cli`',
+  );
   process.exit(1);
 });

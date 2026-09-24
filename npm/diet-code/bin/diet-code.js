@@ -40,7 +40,7 @@ function main() {
       '[diet-code] binary not found.\n' +
         'The postinstall download probably failed (offline install?).\n' +
         'Fix: `npm rebuild diet-code`, or set DIET_CODE_BINARY_PATH to a local build, ' +
-        'or install from source: cargo install diet-code-cli',
+        'or download one from https://github.com/Mohammad-Palla/diet-code/releases',
     );
     process.exit(1);
   }

@@ -6,7 +6,7 @@ use clap::{Args, ValueEnum};
 use crate::output;
 
 /// The skill definition is compiled into the binary so `install` works from any
-/// distribution channel (npm wrapper, shell installer, `cargo install`) without
+/// distribution channel (npm wrapper, shell installer, source build) without
 /// needing the repository on disk.
 const SKILL: &str = include_str!("../../../../skills/diet-code/SKILL.md");
 

@@ -104,9 +104,9 @@ curl -fsSL https://raw.githubusercontent.com/Mohammad-Palla/diet-code/master/scr
 ```
 
 ```bash
-# from source (Rust stable)
-cargo install diet-code-cli          # from crates.io
-cargo install --path crates/diet-code-cli   # from a checkout
+# from a checkout (Rust stable) — not published to crates.io
+git clone https://github.com/Mohammad-Palla/diet-code && cd diet-code
+cargo install --path crates/diet-code-cli
 ```
 
 The npm package downloads the prebuilt binary for your platform

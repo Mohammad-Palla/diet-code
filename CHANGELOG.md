@@ -20,7 +20,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     (`--agent agents`, spliced idempotently so existing content survives).
     `--dry-run` shows the destination and body without writing.
   - The skill is a single file, `skills/diet-code/SKILL.md`, compiled into the
-    binary, so `install` works from npm, the shell installer or `cargo install`
+    binary, so `install` works from npm, the shell installer or a source build
     without the repository on disk.
   - The skill never deletes code: removal stays behind
     `diet-code clean --apply` and explicit approval, and it is instructed never
@@ -124,7 +124,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Initial release: local-first static dead-code analyzer, deterministic
   cleanup (`clean`), and agent benchmark (`benchmark`) for
   TypeScript/JavaScript. Self-contained Rust binary distributed via npm
-  (`@mohammadpalla/diet-code`), a shell installer, and crates.io.
+  (`@mohammadpalla/diet-code`) and a shell installer.
 
 [0.3.0]: https://github.com/Mohammad-Palla/diet-code/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Mohammad-Palla/diet-code/compare/v0.1.1...v0.2.0

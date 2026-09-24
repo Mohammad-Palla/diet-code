@@ -11,7 +11,7 @@ driven by one GitHub Release.
 | npm (primary) | `npm install -g @mohammadpalla/diet-code` | Node 18+, no native build; `postinstall` downloads + checksum-verifies the platform binary |
 | npx | `npx @mohammadpalla/diet-code analyze .` | zero-install run |
 | shell installer | `curl -fsSL …/scripts/install.sh \| sh` | Linux/macOS → `~/.local/bin`, checksum-verified |
-| crates.io | `cargo install diet-code-cli` | for Rust users |
+| from a checkout | `cargo install --path crates/diet-code-cli` | Rust stable; not published to crates.io |
 | GitHub Release assets | direct download | used by the above |
 
 ## How the npm wrapper works
@@ -28,7 +28,7 @@ npm/diet-code/
 - The binary is staged into `bin/vendor/` at install time (gitignored).
 - **Fails closed**: if `checksums.txt` is missing or mismatched, install
   aborts rather than running unverified code.
-- Unsupported platform → clear error pointing at `cargo install`.
+- Unsupported platform → clear error pointing at a source build from a checkout.
 
 Local test without publishing:
 
@@ -59,13 +59,15 @@ Everything is automated in `.github/workflows/release.yml`.
    - generates `checksums.txt`,
    - creates the GitHub Release with all assets,
    - publishes `diet-code` to npm (needs the `NPM_TOKEN` repo secret).
-5. For crates.io, publish manually (needs a crates.io token):
-   ```bash
-   cargo publish -p diet-code-core && sleep 60 && cargo publish -p diet-code-cli
-   ```
 
-Required repo secrets: `NPM_TOKEN` (npm automation token), optionally
-`CARGO_REGISTRY_TOKEN` if you automate crates.io too. Never commit tokens;
+The crates are **not** published to crates.io. `diet-code-core` is a path
+dependency without a version, so `cargo package` cannot build `diet-code-cli`
+for a registry; publishing would also require moving
+`skills/diet-code/SKILL.md` inside the CLI crate, since `install` embeds it with
+`include_str!`. npm, the shell installer and the Release assets are the
+distribution channels.
+
+Required repo secret: `NPM_TOKEN` (npm automation token). Never commit tokens;
 GitHub Actions injects them.
 
 ## Adding a platform
