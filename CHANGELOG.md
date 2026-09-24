@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-09-24
+
+### Fixed
+
+- Removed every `cargo install diet-code-cli` (crates.io) instruction. That
+  crate was never published, so the command fails. Docs and npm runtime error
+  messages now point at the source build from a checkout
+  (`cargo install --path crates/diet-code-cli`) or the GitHub Release
+  binaries, and `docs/distribution.md` records why a registry publish is
+  blocked (versionless path dependency, skill embedded with `include_str!`
+  from outside the CLI crate).
+
 ## [0.3.0] - 2026-09-20
 
 ### Added
@@ -126,6 +138,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TypeScript/JavaScript. Self-contained Rust binary distributed via npm
   (`@mohammadpalla/diet-code`) and a shell installer.
 
+[0.3.1]: https://github.com/Mohammad-Palla/diet-code/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Mohammad-Palla/diet-code/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Mohammad-Palla/diet-code/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Mohammad-Palla/diet-code/compare/v0.1.0...v0.1.1
